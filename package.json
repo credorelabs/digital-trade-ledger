@@ -1,0 +1,34 @@
+{
+    "name": "credore-smart-contract",
+    "version": "0.1.0",
+    "description": "Credore: Zero knowledge payment commitment",
+    "repository": "https://github.com/credorelabs/cross-infra",
+    "author": "Credore <info@credore.xyz>",
+    "workspaces": [
+      "circuits",
+      "contracts"
+    ],
+    "scripts": {
+      "build": "yarn build:circuits && yarn build:contracts",
+      "build:all": "yarn build:circuits && yarn build:contracts",
+      "build:contracts": "yarn workspace contracts build",
+      "deploy:contracts:mumbai": "yarn workspace contracts deploy:mumbai",
+      "deploy:contracts:apothem": "yarn workspace contracts deploy:apothem",
+      "deploy:contracts:baobab": "yarn workspace contracts deploy:baobab",
+      "test:contracts": "yarn workspace contracts test",
+      "build:circuits": "yarn workspace circuits build",
+      "start:zkpc:dev": "yarn workspace zkpc start:dev",
+      "demo": "./demo.sh"
+    },
+    "private": true,
+    "devDependencies": {
+      "@types/pdf-parse": "^1.1.4",
+      "ts-node": "^10.4.0"
+    },
+    "dependencies": {
+      "caniuse-lite": "^1.0.30001418",
+      "commander": "^9.4.1",
+      "pm2": "^5.2.2"
+    }
+  }
+  
