@@ -3,6 +3,7 @@ import * as dotenv from "dotenv";
 import { HardhatUserConfig, task } from "hardhat/config";
 import "@nomiclabs/hardhat-etherscan";
 import "@nomiclabs/hardhat-waffle";
+// import "@nomiclabs/hardhat-chai-matchers";
 import "@typechain/hardhat";
 import "hardhat-gas-reporter";
 import "solidity-coverage";
@@ -99,15 +100,19 @@ const config: HardhatUserConfig = {
       accounts:
         process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
     },
-    hedera :{
-      url: process.env.HEDERA_TEST_NETWORK_URL,
-      chainId: 296,
-      accounts: process.env.HEDERA_PRIVATE_KEY !== undefined ? [process.env.HEDERA_PRIVATE_KEY] : [],
-      timeout: 60000
-    },
+    // hedera :{
+    //   url: process.env.HEDERA_TEST_NETWORK_URL,
+    //   chainId: 296,
+    //   accounts: process.env.HEDERA_PRIVATE_KEY !== undefined ? [process.env.HEDERA_PRIVATE_KEY] : [],
+    //   timeout: 60000
+    // },
     hardhat: {
       chainId: 1337,
     },
+    
+  },
+  paths: {
+    tests: "./test", // Default test directory; adjust if your tests are elsewhere
   },
   gasReporter: {
     enabled: process.env.REPORT_GAS !== undefined,
