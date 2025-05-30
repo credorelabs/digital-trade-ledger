@@ -3,12 +3,11 @@ import * as dotenv from "dotenv";
 import { HardhatUserConfig, task } from "hardhat/config";
 import "@nomiclabs/hardhat-etherscan";
 import "@nomiclabs/hardhat-waffle";
-// import "@nomiclabs/hardhat-chai-matchers";
 import "@typechain/hardhat";
 import "hardhat-gas-reporter";
 import "solidity-coverage";
 import "hardhat-dependency-compiler";
-import { formatEther, parseEther } from "ethers/lib/utils";
+import { parseEther } from "ethers/lib/utils";
 
 dotenv.config();
 
@@ -70,42 +69,13 @@ const config: HardhatUserConfig = {
     
   },
   networks: {
-    sepolia: {
-      url: process.env.SEPOLIA_URL,
-      accounts: process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : []
+    
+    hedera :{
+      url: process.env.HEDERA_TEST_NETWORK_URL,
+      chainId: 296,
+      accounts: process.env.HEDERA_PRIVATE_KEY !== undefined ? [process.env.HEDERA_PRIVATE_KEY] : [],
+      timeout: 60000
     },
-    goerli: {
-      url: process.env.GOERLI_URL || "",
-      //gas: 600000,           // Gas sent with each transaction (default: ~6700000)
-      //gasPrice: 50000000000,  // 3 gwei (in wei) (default: 100 gwei)
-      accounts:
-      process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : []
-    },
-    mumbai: {
-      url: process.env.POLYGON_URL || "",
-      gas: 6000000,           // Gas sent with each transaction (default: ~6700000)
-      gasPrice: 5000000000,  // 3 gwei (in wei) (default: 100 gwei)
-      accounts:
-        process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
-    },
-    apothem: {
-      url: process.env.APOTHEM_NETWORK_URL,
-      // gas: 6000000,           // Gas sent with each transaction (default: ~6700000)
-      // gasPrice: 5000000000,  // 3 gwei (in wei) (default: 100 gwei)
-      accounts: process.env.XINFIN_PRIVATE_KEY !== undefined ? [process.env.XINFIN_PRIVATE_KEY] : [],
-    },
-    baobab: {
-      url: process.env.KLAYTN_BAOBAB_URL || "",
-      gasPrice: 250000000000,  // 3 gwei (in wei) (default: 100 gwei)
-      accounts:
-        process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
-    },
-    // hedera :{
-    //   url: process.env.HEDERA_TEST_NETWORK_URL,
-    //   chainId: 296,
-    //   accounts: process.env.HEDERA_PRIVATE_KEY !== undefined ? [process.env.HEDERA_PRIVATE_KEY] : [],
-    //   timeout: 60000
-    // },
     hardhat: {
       chainId: 1337,
     },
