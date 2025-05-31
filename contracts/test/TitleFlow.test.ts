@@ -273,9 +273,7 @@ describe("TitleFlow", () => {
         expect(await titleEscrowMock.beneficiary()).to.equal(nominee.address);
     });  
   });
-});
-
-describe("TitleFlow - transferHolder", () => {
+  describe("transferHolder()", () => {
     let titleFlow: TitleFlow;
     let titleEscrowMock: TitleEscrowMock;
     let deployer: SignerWithAddress;
@@ -345,7 +343,7 @@ describe("TitleFlow - transferHolder", () => {
     });
   });
 
-  describe("TitleFlow - transferOwners", () => {
+  describe("transferOwners()", () => {
     let titleFlow: TitleFlow;
     let titleEscrowMock: TitleEscrowMock;
     let deployer: SignerWithAddress; // Attorney (admin)
@@ -425,7 +423,7 @@ describe("TitleFlow - transferHolder", () => {
   });
 
 
-  describe("TitleFlow - rejectTransferBeneficiary", () => {
+  describe("rejectTransferBeneficiary()", () => {
     let titleFlow: TitleFlow;
     let titleEscrowMock: TitleEscrowMock;
     let deployer: SignerWithAddress;
@@ -495,7 +493,7 @@ describe("TitleFlow - transferHolder", () => {
     });
   });
 
-  describe("TitleFlow - rejectTransferHolder", () => {
+  describe("rejectTransferHolder()", () => {
     let titleFlow: TitleFlow;
     let titleEscrowMock: TitleEscrowMock;
     let deployer: SignerWithAddress; // Attorney (admin)
@@ -570,7 +568,7 @@ describe("TitleFlow - transferHolder", () => {
     });
   });
 
-  describe("TitleFlow - rejectTransferOwners", () => {
+  describe("rejectTransferOwners()", () => {
     let titleFlow: TitleFlow;
     let titleEscrowMock: TitleEscrowMock;
     let deployer: SignerWithAddress; // Attorney (admin)
@@ -651,145 +649,150 @@ describe("TitleFlow - transferHolder", () => {
     });
   });
 
-describe("TitleFlow - returnToIssuer", () => {
-  let titleFlow: TitleFlow;
-  let titleEscrowMock: TitleEscrowMock;
-  let deployer: SignerWithAddress; // Attorney (admin)
-  let owner: SignerWithAddress;    // Owner who signs actions
+  describe("returnToIssuer()", () => {
+    let titleFlow: TitleFlow;
+    let titleEscrowMock: TitleEscrowMock;
+    let deployer: SignerWithAddress; // Attorney (admin)
+    let owner: SignerWithAddress;    // Owner who signs actions
 
-  const ATTORNEY_ADMIN_ROLE = ethers.utils.keccak256(ethers.utils.toUtf8Bytes("ATTORNEY_ADMIN_ROLE"));
-  const zeroAddress = ethers.constants.AddressZero;
+    const ATTORNEY_ADMIN_ROLE = ethers.utils.keccak256(ethers.utils.toUtf8Bytes("ATTORNEY_ADMIN_ROLE"));
+    const zeroAddress = ethers.constants.AddressZero;
 
-  beforeEach(async () => {
-    [deployer, owner] = await ethers.getSigners();
+    beforeEach(async () => {
+      [deployer, owner] = await ethers.getSigners();
 
-    const TitleEscrowMockFactory = await ethers.getContractFactory("TitleEscrowMock");
-    titleEscrowMock = await TitleEscrowMockFactory.deploy();
-    await titleEscrowMock.deployed();
+      const TitleEscrowMockFactory = await ethers.getContractFactory("TitleEscrowMock");
+      titleEscrowMock = await TitleEscrowMockFactory.deploy();
+      await titleEscrowMock.deployed();
 
-    const TitleFlowFactory = await ethers.getContractFactory("TitleFlow");
-    titleFlow = await TitleFlowFactory.deploy();
-    await titleFlow.deployed();
+      const TitleFlowFactory = await ethers.getContractFactory("TitleFlow");
+      titleFlow = await TitleFlowFactory.deploy();
+      await titleFlow.deployed();
 
-    await titleFlow.initialize(deployer.address, owner.address);
+      await titleFlow.initialize(deployer.address, owner.address);
 
-    // Set initial state
-    await titleEscrowMock.setState(
-      owner.address,        // Beneficiary
-      deployer.address,     // Holder
-      zeroAddress,
-      zeroAddress,
-      zeroAddress,
-      true,                 // Active
-      titleEscrowMock.address,
-      42
-    );
+      // Set initial state
+      await titleEscrowMock.setState(
+        owner.address,        // Beneficiary
+        deployer.address,     // Holder
+        zeroAddress,
+        zeroAddress,
+        zeroAddress,
+        true,                 // Active
+        titleEscrowMock.address,
+        42
+      );
 
-    expect(await titleEscrowMock.active()).to.be.true;
+      expect(await titleEscrowMock.active()).to.be.true;
+    });
+
+    it("should successfully return to issuer with valid signature and emit ReturnToIssuer event", async () => {
+      const nonce = 0;
+      const remark = ethers.utils.toUtf8Bytes("Return to issuer remark");
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "uint256", "uint8"],
+        [titleEscrowMock.address, zeroAddress, zeroAddress, nonce, 7] // ActionType.ReturnToIssuer = 7
+      );
+      const messageHash = ethers.utils.keccak256(actionData);
+      const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
+
+      const tx = await titleFlow.connect(deployer).returnToIssuer(
+        remark,
+        titleEscrowMock.address,
+        actionData,
+        signature,
+        nonce
+      );
+      const receipt = await tx.wait();
+
+      // Verify event
+      const event = receipt.events?.find((e) => e.event === "ReturnToIssuer");
+      expect(event).to.exist;
+      expect(event?.args?.caller).to.equal(deployer.address);
+      expect(event?.args?.registry).to.equal(titleEscrowMock.address);
+      expect(event?.args?.tokenId).to.equal(42);
+      expect(event?.args?.remark).to.equal(ethers.utils.hexlify(remark));
+
+      // Verify nonce increment
+      expect(await titleFlow.nonce(titleEscrowMock.address, owner.address)).to.equal(1);
+
+      // Verify mock state (active set to false)
+      expect(await titleEscrowMock.active()).to.be.false;
+    });
   });
 
-  it("should successfully return to issuer with valid signature and emit ReturnToIssuer event", async () => {
-    const nonce = 0;
-    const remark = ethers.utils.toUtf8Bytes("Return to issuer remark");
-    const actionData = ethers.utils.defaultAbiCoder.encode(
-      ["address", "address", "address", "uint256", "uint8"],
-      [titleEscrowMock.address, zeroAddress, zeroAddress, nonce, 7] // ActionType.ReturnToIssuer = 7
-    );
-    const messageHash = ethers.utils.keccak256(actionData);
-    const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
+  describe("shred()", () => {
+    let titleFlow: TitleFlow;
+    let titleEscrowMock: TitleEscrowMock;
+    let deployer: SignerWithAddress; // Attorney (admin)
+    let owner: SignerWithAddress;    // Owner who signs actions
 
-    const tx = await titleFlow.connect(deployer).returnToIssuer(
-      remark,
-      titleEscrowMock.address,
-      actionData,
-      signature,
-      nonce
-    );
-    const receipt = await tx.wait();
+    const ATTORNEY_ADMIN_ROLE = ethers.utils.keccak256(ethers.utils.toUtf8Bytes("ATTORNEY_ADMIN_ROLE"));
+    const zeroAddress = ethers.constants.AddressZero;
 
-    // Verify event
-    const event = receipt.events?.find((e) => e.event === "ReturnToIssuer");
-    expect(event).to.exist;
-    expect(event?.args?.caller).to.equal(deployer.address);
-    expect(event?.args?.registry).to.equal(titleEscrowMock.address);
-    expect(event?.args?.tokenId).to.equal(42);
-    expect(event?.args?.remark).to.equal(ethers.utils.hexlify(remark));
+    beforeEach(async () => {
+      [deployer, owner] = await ethers.getSigners();
 
-    // Verify nonce increment
-    expect(await titleFlow.nonce(titleEscrowMock.address, owner.address)).to.equal(1);
+      const TitleEscrowMockFactory = await ethers.getContractFactory("TitleEscrowMock");
+      titleEscrowMock = await TitleEscrowMockFactory.deploy();
+      await titleEscrowMock.deployed();
 
-    // Verify mock state (active set to false)
-    expect(await titleEscrowMock.active()).to.be.false;
+      const TitleFlowFactory = await ethers.getContractFactory("TitleFlow");
+      titleFlow = await TitleFlowFactory.deploy();
+      await titleFlow.deployed();
+
+      await titleFlow.initialize(deployer.address, owner.address);
+
+      // Set initial state
+      await titleEscrowMock.setState(
+        owner.address,        // Beneficiary
+        deployer.address,     // Holder
+        zeroAddress,
+        zeroAddress,
+        zeroAddress,
+        true,                 // Active
+        titleEscrowMock.address,
+        42
+      );
+
+      expect(await titleEscrowMock.active()).to.be.true;
+    });
+
+    it("should successfully shred with valid signature and emit Shred event", async () => {
+      const nonce = 0;
+      const remark = ethers.utils.toUtf8Bytes("Shred remark");
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "uint256", "uint8"],
+        [titleEscrowMock.address, zeroAddress, zeroAddress, nonce, 8] // ActionType.Shred = 8
+      );
+      const messageHash = ethers.utils.keccak256(actionData);
+      const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
+
+      const tx = await titleFlow.connect(deployer).shred(
+        remark,
+        titleEscrowMock.address,
+        actionData,
+        signature,
+        nonce
+      );
+      const receipt = await tx.wait();
+
+      // Verify event
+      const event = receipt.events?.find((e) => e.event === "Shred");
+      expect(event).to.exist;
+      expect(event?.args?.registry).to.equal(titleEscrowMock.address);
+      expect(event?.args?.tokenId).to.equal(42);
+      expect(event?.args?.remark).to.equal(ethers.utils.hexlify(remark));
+
+      // Verify nonce increment
+      expect(await titleFlow.nonce(titleEscrowMock.address, owner.address)).to.equal(1);
+
+      // Verify mock state (active set to false)
+      expect(await titleEscrowMock.active()).to.be.false;
+    });
   });
+
 });
 
-describe("TitleFlow - shred", () => {
-  let titleFlow: TitleFlow;
-  let titleEscrowMock: TitleEscrowMock;
-  let deployer: SignerWithAddress; // Attorney (admin)
-  let owner: SignerWithAddress;    // Owner who signs actions
 
-  const ATTORNEY_ADMIN_ROLE = ethers.utils.keccak256(ethers.utils.toUtf8Bytes("ATTORNEY_ADMIN_ROLE"));
-  const zeroAddress = ethers.constants.AddressZero;
-
-  beforeEach(async () => {
-    [deployer, owner] = await ethers.getSigners();
-
-    const TitleEscrowMockFactory = await ethers.getContractFactory("TitleEscrowMock");
-    titleEscrowMock = await TitleEscrowMockFactory.deploy();
-    await titleEscrowMock.deployed();
-
-    const TitleFlowFactory = await ethers.getContractFactory("TitleFlow");
-    titleFlow = await TitleFlowFactory.deploy();
-    await titleFlow.deployed();
-
-    await titleFlow.initialize(deployer.address, owner.address);
-
-    // Set initial state
-    await titleEscrowMock.setState(
-      owner.address,        // Beneficiary
-      deployer.address,     // Holder
-      zeroAddress,
-      zeroAddress,
-      zeroAddress,
-      true,                 // Active
-      titleEscrowMock.address,
-      42
-    );
-
-    expect(await titleEscrowMock.active()).to.be.true;
-  });
-
-  it("should successfully shred with valid signature and emit Shred event", async () => {
-    const nonce = 0;
-    const remark = ethers.utils.toUtf8Bytes("Shred remark");
-    const actionData = ethers.utils.defaultAbiCoder.encode(
-      ["address", "address", "address", "uint256", "uint8"],
-      [titleEscrowMock.address, zeroAddress, zeroAddress, nonce, 8] // ActionType.Shred = 8
-    );
-    const messageHash = ethers.utils.keccak256(actionData);
-    const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
-
-    const tx = await titleFlow.connect(deployer).shred(
-      remark,
-      titleEscrowMock.address,
-      actionData,
-      signature,
-      nonce
-    );
-    const receipt = await tx.wait();
-
-    // Verify event
-    const event = receipt.events?.find((e) => e.event === "Shred");
-    expect(event).to.exist;
-    expect(event?.args?.registry).to.equal(titleEscrowMock.address);
-    expect(event?.args?.tokenId).to.equal(42);
-    expect(event?.args?.remark).to.equal(ethers.utils.hexlify(remark));
-
-    // Verify nonce increment
-    expect(await titleFlow.nonce(titleEscrowMock.address, owner.address)).to.equal(1);
-
-    // Verify mock state (active set to false)
-    expect(await titleEscrowMock.active()).to.be.false;
-  });
-});
+  
