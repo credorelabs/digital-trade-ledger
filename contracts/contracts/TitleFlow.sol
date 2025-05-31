@@ -294,8 +294,6 @@ contract TitleFlow is ITitleFlow, AccessControl, TitleEscrowErrorsV2, Initializa
         if (_signature.length != 65) revert InvalidSignatureLength();
         if (_nonce != nonces[_titleEscrow][owner]) revert InvalidNonce();
 
-        // bytes memory expectedData = abi.encode(_titleEscrow, _nominee, _newHolder, _nonce, uint8(action));
-        // if (!_verifySignature(owner, expectedData, _signature)) revert InvalidSigner();
         bytes memory expectedData = abi.encode(address(this), _titleEscrow, _nominee, _newHolder, _nonce, uint8(action));
         if (!_verifySignature(owner, expectedData, _signature)) revert InvalidSigner();
         usedNonces[_titleEscrow][owner][_nonce] = true;
