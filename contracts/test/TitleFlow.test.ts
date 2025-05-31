@@ -53,8 +53,8 @@ describe("TitleFlow", () => {
       const nonce = 0;
       const remark = ethers.utils.toUtf8Bytes("Nomination remark");
       const actionData = ethers.utils.defaultAbiCoder.encode(
-        ["address", "address", "address", "uint256", "uint8"],
-        [titleEscrowMock.address, nominee.address, zeroAddress, nonce, 0]
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, nominee.address, zeroAddress, nonce, 0]
       );
       const messageHash = ethers.utils.keccak256(actionData);
       const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
@@ -87,8 +87,8 @@ describe("TitleFlow", () => {
       const nonce = 0;
       const remark = ethers.utils.toUtf8Bytes("Nomination remark");
       const actionData = ethers.utils.defaultAbiCoder.encode(
-        ["address", "address", "address", "uint256", "uint8"],
-        [titleEscrowMock.address, nominee.address, zeroAddress, nonce, 0]
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, nominee.address, zeroAddress, nonce, 0]
       );
       const signature = await owner.signMessage(ethers.utils.arrayify(ethers.utils.keccak256(actionData)));
 
@@ -110,8 +110,8 @@ describe("TitleFlow", () => {
       const nonce = 1;
       const remark = ethers.utils.toUtf8Bytes("Nomination remark");
       const actionData = ethers.utils.defaultAbiCoder.encode(
-        ["address", "address", "address", "uint256", "uint8"],
-        [titleEscrowMock.address, nominee.address, zeroAddress, nonce, 0]
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, nominee.address, zeroAddress, nonce, 0]
       );
       const signature = await owner.signMessage(ethers.utils.arrayify(ethers.utils.keccak256(actionData)));
 
@@ -131,8 +131,8 @@ describe("TitleFlow", () => {
       const nonce = 0;
       const remark = ethers.utils.toUtf8Bytes("Nomination remark");
       const actionData = ethers.utils.defaultAbiCoder.encode(
-        ["address", "address", "address", "uint256", "uint8"],
-        [titleEscrowMock.address, nominee.address, zeroAddress, nonce, 0]
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, nominee.address, zeroAddress, nonce, 0]
       );
       const wrongSignature = await nonAdmin.signMessage(ethers.utils.arrayify(ethers.utils.keccak256(actionData)));
 
@@ -152,8 +152,8 @@ describe("TitleFlow", () => {
       const nonce = 0;
       const remark = ethers.utils.toUtf8Bytes("Nomination remark");
       const actionData = ethers.utils.defaultAbiCoder.encode(
-        ["address", "address", "address", "uint256", "uint8"],
-        [titleEscrowMock.address, zeroAddress, zeroAddress, nonce, 0]
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, nominee.address, zeroAddress, nonce, 0]
       );
       const signature = await owner.signMessage(ethers.utils.arrayify(ethers.utils.keccak256(actionData)));
 
@@ -173,8 +173,8 @@ describe("TitleFlow", () => {
       const nonce = 0;
       const remark = ethers.utils.toUtf8Bytes("Nomination remark");
       const actionData = ethers.utils.defaultAbiCoder.encode(
-        ["address", "address", "address", "uint256", "uint8"],
-        [zeroAddress, nominee.address, zeroAddress, nonce, 0]
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, nominee.address, zeroAddress, nonce, 0]
       );
       const signature = await owner.signMessage(ethers.utils.arrayify(ethers.utils.keccak256(actionData)));
 
@@ -196,8 +196,8 @@ describe("TitleFlow", () => {
       const nonce = 0;
       const remark = ethers.utils.toUtf8Bytes("Nomination remark");
       const actionData = ethers.utils.defaultAbiCoder.encode(
-        ["address", "address", "address", "uint256", "uint8"],
-        [titleEscrowMock.address, nominee.address, zeroAddress, nonce, 0]
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, nominee.address, zeroAddress, nonce, 0]
       );
       const signature = await owner.signMessage(ethers.utils.arrayify(ethers.utils.keccak256(actionData)));
 
@@ -245,8 +245,8 @@ describe("TitleFlow", () => {
         const nonce = 0;
         const remark = ethers.utils.toUtf8Bytes("Beneficiary transfer remark");
         const actionData = ethers.utils.defaultAbiCoder.encode(
-            ["address", "address", "address", "uint256", "uint8"],
-            [titleEscrowMock.address, nominee.address, zeroAddress, nonce, 1]
+          ["address", "address", "address", "address", "uint256", "uint8"],
+          [titleFlow.address, titleEscrowMock.address, nominee.address, zeroAddress, nonce, 1]
         );
         const messageHash = ethers.utils.keccak256(actionData);
         const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
@@ -273,6 +273,7 @@ describe("TitleFlow", () => {
         expect(await titleEscrowMock.beneficiary()).to.equal(nominee.address);
     });  
   });
+  
   describe("transferHolder()", () => {
     let titleFlow: TitleFlow;
     let titleEscrowMock: TitleEscrowMock;
@@ -314,8 +315,8 @@ describe("TitleFlow", () => {
       const nonce = 0;
       const remark = ethers.utils.toUtf8Bytes("Holder transfer remark");
       const actionData = ethers.utils.defaultAbiCoder.encode(
-        ["address", "address", "address", "uint256", "uint8"],
-        [titleEscrowMock.address, zeroAddress, newHolder.address, nonce, 2]
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, zeroAddress, newHolder.address, nonce, 2]
       );
       const messageHash = ethers.utils.keccak256(actionData);
       const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
@@ -388,8 +389,8 @@ describe("TitleFlow", () => {
       const nonce = 0;
       const remark = ethers.utils.toUtf8Bytes("Owners transfer remark");
       const actionData = ethers.utils.defaultAbiCoder.encode(
-        ["address", "address", "address", "uint256", "uint8"],
-        [titleEscrowMock.address, nominee.address, newHolder.address, nonce, 3] // ActionType.OwnersTransfer = 3
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, nominee.address, newHolder.address, nonce, 3] // ActionType.OwnersTransfer = 3
       );
       const messageHash = ethers.utils.keccak256(actionData);
       const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
@@ -465,8 +466,8 @@ describe("TitleFlow", () => {
       const nonce = 0;
       const remark = ethers.utils.toUtf8Bytes("Reject beneficiary remark");
       const actionData = ethers.utils.defaultAbiCoder.encode(
-        ["address", "address", "address", "uint256", "uint8"],
-        [titleEscrowMock.address, zeroAddress, zeroAddress, nonce, 4]
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, zeroAddress, zeroAddress, nonce, 4]
       );
       const messageHash = ethers.utils.keccak256(actionData);
       const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
@@ -536,8 +537,8 @@ describe("TitleFlow", () => {
       const nonce = 0;
       const remark = ethers.utils.toUtf8Bytes("Reject holder remark");
       const actionData = ethers.utils.defaultAbiCoder.encode(
-        ["address", "address", "address", "uint256", "uint8"],
-        [titleEscrowMock.address, zeroAddress, zeroAddress, nonce, 5] // ActionType.RejectHolder = 5
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, zeroAddress, zeroAddress, nonce, 5]
       );
       const messageHash = ethers.utils.keccak256(actionData);
       const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
@@ -614,8 +615,8 @@ describe("TitleFlow", () => {
       const nonce = 0;
       const remark = ethers.utils.toUtf8Bytes("Reject owners remark");
       const actionData = ethers.utils.defaultAbiCoder.encode(
-        ["address", "address", "address", "uint256", "uint8"],
-        [titleEscrowMock.address, zeroAddress, zeroAddress, nonce, 6] // ActionType.RejectOwners = 6
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, zeroAddress, zeroAddress, nonce, 6] // ActionType.RejectOwners = 6
       );
       const messageHash = ethers.utils.keccak256(actionData);
       const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
@@ -690,9 +691,10 @@ describe("TitleFlow", () => {
       const nonce = 0;
       const remark = ethers.utils.toUtf8Bytes("Return to issuer remark");
       const actionData = ethers.utils.defaultAbiCoder.encode(
-        ["address", "address", "address", "uint256", "uint8"],
-        [titleEscrowMock.address, zeroAddress, zeroAddress, nonce, 7] // ActionType.ReturnToIssuer = 7
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, zeroAddress, zeroAddress, nonce, 7] // ActionType.ReturnToIssuer = 7
       );
+      
       const messageHash = ethers.utils.keccak256(actionData);
       const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
 
@@ -762,8 +764,8 @@ describe("TitleFlow", () => {
       const nonce = 0;
       const remark = ethers.utils.toUtf8Bytes("Shred remark");
       const actionData = ethers.utils.defaultAbiCoder.encode(
-        ["address", "address", "address", "uint256", "uint8"],
-        [titleEscrowMock.address, zeroAddress, zeroAddress, nonce, 8] // ActionType.Shred = 8
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, zeroAddress, zeroAddress, nonce, 8] // ActionType.Shred = 8
       );
       const messageHash = ethers.utils.keccak256(actionData);
       const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));

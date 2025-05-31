@@ -21,6 +21,7 @@ contract TitleFlow is ITitleFlow, AccessControl, TitleEscrowErrorsV2, Initializa
     address public attorney; // Admin relayer
     bytes32 public constant ATTORNEY_ADMIN_ROLE = keccak256("ATTORNEY_ADMIN_ROLE");
     mapping(address => mapping(address => uint256)) private nonces; // titleEscrow => owner => nonce
+    mapping(address => mapping(address => mapping(uint256 => bool))) private usedNonces;
 
     // Events from ITitleEscrowV2
     event TokenReceived(address indexed beneficiary, address indexed holder, bool indexed isMinting, address registry, uint256 tokenId, bytes remark);
@@ -282,6 +283,7 @@ contract TitleFlow is ITitleFlow, AccessControl, TitleEscrowErrorsV2, Initializa
         uint256 _nonce,
         ActionType action
     ) private {
+        if (usedNonces[_titleEscrow][owner][_nonce]) revert InvalidNonce();
         if (_titleEscrow == address(0) || !_isContract(_titleEscrow)) revert InvalidOperationToZeroAddress();
         if ((action == ActionType.Nominate || action == ActionType.BeneficiaryTransfer) && _nominee == address(0)) 
             revert InvalidOperationToZeroAddress();
@@ -292,8 +294,11 @@ contract TitleFlow is ITitleFlow, AccessControl, TitleEscrowErrorsV2, Initializa
         if (_signature.length != 65) revert InvalidSignatureLength();
         if (_nonce != nonces[_titleEscrow][owner]) revert InvalidNonce();
 
-        bytes memory expectedData = abi.encode(_titleEscrow, _nominee, _newHolder, _nonce, uint8(action));
+        // bytes memory expectedData = abi.encode(_titleEscrow, _nominee, _newHolder, _nonce, uint8(action));
+        // if (!_verifySignature(owner, expectedData, _signature)) revert InvalidSigner();
+        bytes memory expectedData = abi.encode(address(this), _titleEscrow, _nominee, _newHolder, _nonce, uint8(action));
         if (!_verifySignature(owner, expectedData, _signature)) revert InvalidSigner();
+        usedNonces[_titleEscrow][owner][_nonce] = true;
     }
 
     function nonce(address _titleEscrow, address _user) override external view returns (uint256) {
