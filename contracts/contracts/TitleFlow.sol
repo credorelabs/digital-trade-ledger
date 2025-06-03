@@ -1,4 +1,4 @@
-//SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Author: Credore (Trustless Private Limited)
 
 pragma solidity >=0.8.0;
@@ -9,10 +9,16 @@ import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
+import "./interfaces/ITitleFlow.sol";
 import "./interfaces/ITitleEscrowV2.sol";
 import "./interfaces/TitleEscrowErrorsV2.sol";
 
-contract TitleFlow is AccessControl, TitleEscrowErrorsV2, Initializable, ReentrancyGuard, IERC721Receiver{
+/**
+ * @title TitleFlow
+ * @dev Gasless implementation for managing title escrow operations, enabling entities to interact without holding blockchain native tokens.
+ *      Internally calls the TradeTrust TitleEscrow smart contract to facilitate secure and verifiable digital trade asset management.
+ */
+contract TitleFlow is ITitleFlow, AccessControl, TitleEscrowErrorsV2, Initializable, ReentrancyGuard, IERC721Receiver{
     using Address for address;
     using ECDSA for bytes32;
 
@@ -20,6 +26,7 @@ contract TitleFlow is AccessControl, TitleEscrowErrorsV2, Initializable, Reentra
     address public attorney; // Admin relayer
     bytes32 public constant ATTORNEY_ADMIN_ROLE = keccak256("ATTORNEY_ADMIN_ROLE");
     mapping(address => mapping(address => uint256)) private nonces; // titleEscrow => owner => nonce
+    mapping(address => mapping(address => mapping(uint256 => bool))) private usedNonces;
 
     // Events from ITitleEscrowV2
     event TokenReceived(address indexed beneficiary, address indexed holder, bool indexed isMinting, address registry, uint256 tokenId, bytes remark);
@@ -38,8 +45,9 @@ contract TitleFlow is AccessControl, TitleEscrowErrorsV2, Initializable, Reentra
     constructor() {}
 
     /// @notice Initializes the contract with attorney and owner addresses
-    function initialize(address _attorney, address _owner) public virtual initializer {
+    function initialize(address _attorney, address _owner) override public virtual initializer {
         _setupRole(ATTORNEY_ADMIN_ROLE, _attorney);
+        _setupRole(DEFAULT_ADMIN_ROLE, _owner); // Ensure this line exists
         __TitleFlow_init(_attorney, _owner);
     }
 
@@ -50,7 +58,7 @@ contract TitleFlow is AccessControl, TitleEscrowErrorsV2, Initializable, Reentra
     }
 
     /// @notice Updates the attorney, revoking the old one's role
-    function setAttorney(address newAttorney) public onlyRole(ATTORNEY_ADMIN_ROLE) {
+    function setAttorney(address newAttorney) override public onlyRole(ATTORNEY_ADMIN_ROLE) {
         if (newAttorney == address(0)) revert InvalidOperationToZeroAddress();
         address oldAttorney = attorney;
         _setupRole(ATTORNEY_ADMIN_ROLE, newAttorney);
@@ -66,7 +74,7 @@ contract TitleFlow is AccessControl, TitleEscrowErrorsV2, Initializable, Reentra
 
     // Gasless ITitleEscrowV2 methods
     function nominate(address _nominee, bytes calldata _remark, address _titleEscrow, bytes memory _data, bytes calldata _signature, uint256 _nonce)
-        public onlyRole(ATTORNEY_ADMIN_ROLE) nonReentrant
+        override public onlyRole(ATTORNEY_ADMIN_ROLE) nonReentrant
     {
         _verifyAction(_titleEscrow, _nominee, address(0), _data, _signature, _nonce, ActionType.Nominate);
         (bool success, ) = _titleEscrow.call(abi.encodeWithSelector(ITitleEscrowV2.nominate.selector, _nominee, _remark));
@@ -76,7 +84,7 @@ contract TitleFlow is AccessControl, TitleEscrowErrorsV2, Initializable, Reentra
     }
 
     function transferBeneficiary(address _nominee, bytes calldata _remark, address _titleEscrow, bytes memory _data, bytes calldata _signature, uint256 _nonce)
-        public onlyRole(ATTORNEY_ADMIN_ROLE) nonReentrant
+        override public onlyRole(ATTORNEY_ADMIN_ROLE) nonReentrant
     {
         _verifyAction(_titleEscrow, _nominee, address(0), _data, _signature, _nonce, ActionType.BeneficiaryTransfer);
         ITitleEscrowV2 escrow = ITitleEscrowV2(_titleEscrow);
@@ -94,7 +102,7 @@ contract TitleFlow is AccessControl, TitleEscrowErrorsV2, Initializable, Reentra
         bytes memory _data,
         bytes calldata _signature,
         uint256 _nonce
-    ) public onlyRole(ATTORNEY_ADMIN_ROLE) nonReentrant {
+    ) override public onlyRole(ATTORNEY_ADMIN_ROLE) nonReentrant {
         _verifyAction(_titleEscrow, address(0), _newHolder, _data, _signature, _nonce, ActionType.HolderTransfer);
         ITitleEscrowV2 escrow = ITitleEscrowV2(_titleEscrow);
         address fromHolder = escrow.holder(); // Fetch before transfer
@@ -105,7 +113,7 @@ contract TitleFlow is AccessControl, TitleEscrowErrorsV2, Initializable, Reentra
     }
 
     function transferOwners(address _nominee, address _newHolder, bytes calldata _remark, address _titleEscrow, bytes memory _data, bytes calldata _signature, uint256 _nonce)
-        public onlyRole(ATTORNEY_ADMIN_ROLE) nonReentrant
+        override public onlyRole(ATTORNEY_ADMIN_ROLE) nonReentrant
     {
         _verifyAction(_titleEscrow, _nominee, _newHolder, _data, _signature, _nonce, ActionType.OwnersTransfer);
         (bool success, ) = _titleEscrow.call(abi.encodeWithSelector(ITitleEscrowV2.transferOwners.selector, _nominee, _newHolder, _remark));
@@ -120,7 +128,7 @@ contract TitleFlow is AccessControl, TitleEscrowErrorsV2, Initializable, Reentra
         bytes memory _data,
         bytes calldata _signature,
         uint256 _nonce
-    ) public onlyRole(ATTORNEY_ADMIN_ROLE) nonReentrant {
+    ) override public onlyRole(ATTORNEY_ADMIN_ROLE) nonReentrant {
         _verifyAction(_titleEscrow, address(0), address(0), _data, _signature, _nonce, ActionType.RejectBeneficiary);
         ITitleEscrowV2 escrow = ITitleEscrowV2(_titleEscrow);
         address toBeneficiary = escrow.nominee(); // Fetch before rejection
@@ -136,7 +144,7 @@ contract TitleFlow is AccessControl, TitleEscrowErrorsV2, Initializable, Reentra
         bytes memory _data,
         bytes calldata _signature,
         uint256 _nonce
-    ) public onlyRole(ATTORNEY_ADMIN_ROLE) nonReentrant {
+    ) override public onlyRole(ATTORNEY_ADMIN_ROLE) nonReentrant {
         _verifyAction(_titleEscrow, address(0), address(0), _data, _signature, _nonce, ActionType.RejectHolder);
         ITitleEscrowV2 escrow = ITitleEscrowV2(_titleEscrow);
         address toHolder = escrow.prevHolder(); // Fetch before rejection
@@ -162,7 +170,7 @@ contract TitleFlow is AccessControl, TitleEscrowErrorsV2, Initializable, Reentra
         bytes memory _data,
         bytes calldata _signature,
         uint256 _nonce
-    ) public onlyRole(ATTORNEY_ADMIN_ROLE) nonReentrant {
+    ) override public onlyRole(ATTORNEY_ADMIN_ROLE) nonReentrant {
         _verifyAction(_titleEscrow, address(0), address(0), _data, _signature, _nonce, ActionType.RejectOwners);
         ITitleEscrowV2 escrow = ITitleEscrowV2(_titleEscrow);
         address nominee = escrow.nominee(); // Capture nominee before rejection
@@ -196,7 +204,7 @@ contract TitleFlow is AccessControl, TitleEscrowErrorsV2, Initializable, Reentra
         bytes memory _data,
         bytes calldata _signature,
         uint256 _nonce
-    ) public onlyRole(ATTORNEY_ADMIN_ROLE) nonReentrant {
+    ) override public onlyRole(ATTORNEY_ADMIN_ROLE) nonReentrant {
         _verifyAction(_titleEscrow, address(0), address(0), _data, _signature, _nonce, ActionType.ReturnToIssuer);
         ITitleEscrowV2 escrow = ITitleEscrowV2(_titleEscrow);
         (bool success, ) = _titleEscrow.call(abi.encodeWithSelector(ITitleEscrowV2.returnToIssuer.selector, _remark));
@@ -210,58 +218,58 @@ contract TitleFlow is AccessControl, TitleEscrowErrorsV2, Initializable, Reentra
     }
 
     function shred(
-    bytes calldata _remark,
-    address _titleEscrow,
-    bytes memory _data,
-    bytes calldata _signature,
-    uint256 _nonce
-) public onlyRole(ATTORNEY_ADMIN_ROLE) nonReentrant {
-    _verifyAction(_titleEscrow, address(0), address(0), _data, _signature, _nonce, ActionType.Shred);
-    ITitleEscrowV2 escrow = ITitleEscrowV2(_titleEscrow);
-    (bool success, ) = _titleEscrow.call(abi.encodeWithSelector(ITitleEscrowV2.shred.selector, _remark));
-    if (!success) revert ActionFailed("Shred failed");
-    nonces[_titleEscrow][owner]++;
-    _emitShred(escrow, _remark);
-}
+        bytes calldata _remark,
+        address _titleEscrow,
+        bytes memory _data,
+        bytes calldata _signature,
+        uint256 _nonce
+    ) override public onlyRole(ATTORNEY_ADMIN_ROLE) nonReentrant {
+        _verifyAction(_titleEscrow, address(0), address(0), _data, _signature, _nonce, ActionType.Shred);
+        ITitleEscrowV2 escrow = ITitleEscrowV2(_titleEscrow);
+        (bool success, ) = _titleEscrow.call(abi.encodeWithSelector(ITitleEscrowV2.shred.selector, _remark));
+        if (!success) revert ActionFailed("Shred failed");
+        nonces[_titleEscrow][owner]++;
+        _emitShred(escrow, _remark);
+    }
 
-function _emitShred(ITitleEscrowV2 escrow, bytes calldata _remark) internal {
-    emit Shred(escrow.registry(), escrow.tokenId(), _remark);
-}
+    function _emitShred(ITitleEscrowV2 escrow, bytes calldata _remark) internal {
+        emit Shred(escrow.registry(), escrow.tokenId(), _remark);
+    }
 
     // View functions (not gasless, direct calls to ITitleEscrowV2)
-    function beneficiary(address _titleEscrow) external view returns (address) {
+    function beneficiary(address _titleEscrow) override external view returns (address) {
         return ITitleEscrowV2(_titleEscrow).beneficiary();
     }
 
-    function holder(address _titleEscrow) external view returns (address) {
+    function holder(address _titleEscrow) override external view returns (address) {
         return ITitleEscrowV2(_titleEscrow).holder();
     }
 
-    function prevBeneficiary(address _titleEscrow) external view returns (address) {
+    function prevBeneficiary(address _titleEscrow) override external view returns (address) {
         return ITitleEscrowV2(_titleEscrow).prevBeneficiary();
     }
 
-    function prevHolder(address _titleEscrow) external view returns (address) {
+    function prevHolder(address _titleEscrow) override external view returns (address) {
         return ITitleEscrowV2(_titleEscrow).prevHolder();
     }
 
-    function active(address _titleEscrow) external view returns (bool) {
+    function active(address _titleEscrow) override external view returns (bool) {
         return ITitleEscrowV2(_titleEscrow).active();
     }
 
-    function nominee(address _titleEscrow) external view returns (address) {
+    function nominee(address _titleEscrow) override external view returns (address) {
         return ITitleEscrowV2(_titleEscrow).nominee();
     }
 
-    function registry(address _titleEscrow) external view returns (address) {
+    function registry(address _titleEscrow) override external view returns (address) {
         return ITitleEscrowV2(_titleEscrow).registry();
     }
 
-    function tokenId(address _titleEscrow) external view returns (uint256) {
+    function tokenId(address _titleEscrow) override external view returns (uint256) {
         return ITitleEscrowV2(_titleEscrow).tokenId();
     }
 
-    function isHoldingToken(address _titleEscrow) external returns (bool) {
+    function isHoldingToken(address _titleEscrow) override external returns (bool) {
         return ITitleEscrowV2(_titleEscrow).isHoldingToken();
     }
 
@@ -281,6 +289,7 @@ function _emitShred(ITitleEscrowV2 escrow, bytes calldata _remark) internal {
         uint256 _nonce,
         ActionType action
     ) private {
+        if (usedNonces[_titleEscrow][owner][_nonce]) revert InvalidNonce();
         if (_titleEscrow == address(0) || !_isContract(_titleEscrow)) revert InvalidOperationToZeroAddress();
         if ((action == ActionType.Nominate || action == ActionType.BeneficiaryTransfer) && _nominee == address(0)) 
             revert InvalidOperationToZeroAddress();
@@ -291,11 +300,12 @@ function _emitShred(ITitleEscrowV2 escrow, bytes calldata _remark) internal {
         if (_signature.length != 65) revert InvalidSignatureLength();
         if (_nonce != nonces[_titleEscrow][owner]) revert InvalidNonce();
 
-        bytes memory expectedData = abi.encode(_titleEscrow, _nominee, _newHolder, _nonce, uint8(action));
+        bytes memory expectedData = abi.encode(address(this), _titleEscrow, _nominee, _newHolder, _nonce, uint8(action));
         if (!_verifySignature(owner, expectedData, _signature)) revert InvalidSigner();
+        usedNonces[_titleEscrow][owner][_nonce] = true;
     }
 
-    function nonce(address _titleEscrow, address _user) external view returns (uint256) {
+    function nonce(address _titleEscrow, address _user) override external view returns (uint256) {
         if (_titleEscrow == address(0) || _user == address(0)) revert InvalidOperationToZeroAddress();
         return nonces[_titleEscrow][_user];
     }
@@ -307,13 +317,6 @@ function _emitShred(ITitleEscrowV2 escrow, bytes calldata _remark) internal {
         if (signer == address(0)) revert InvalidSignature();
         return signer == approver;
     }
-
-    // function _verifyApprover(address approver, bytes memory data, bytes memory signature) private pure returns (bool) {
-    //     bytes32 messageHash = keccak256(abi.encodePacked(data));
-    //     bytes32 ethSignedMessageHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash));
-    //     address signer = recoverSigner(ethSignedMessageHash, signature);
-    //     return signer != address(0) && signer == approver;
-    // }
 
     function recoverSigner(bytes32 _ethSignedMessageHash, bytes memory _signature) private pure returns (address) {
         (bytes32 r, bytes32 s, uint8 v) = splitSignature(_signature);

@@ -1,11 +1,12 @@
 import { ethers } from "hardhat";
 import { expect } from "chai";
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
-import { TitleFlow, TitleEscrowMock } from "../typechain"; // Adjust path
+import { TitleFlow, TitleEscrowMock, MaliciousTitleEscrow } from "../typechain"; // Adjust path
 
 describe("TitleFlow", () => {
   let titleFlow: TitleFlow;
   let titleEscrowMock: TitleEscrowMock;
+  let maliciousEscrow: MaliciousTitleEscrow;
   let deployer: SignerWithAddress;
   let owner: SignerWithAddress;
   let nominee: SignerWithAddress;
@@ -21,11 +22,13 @@ describe("TitleFlow", () => {
     const TitleEscrowMockFactory = await ethers.getContractFactory("TitleEscrowMock");
     titleEscrowMock = await TitleEscrowMockFactory.deploy();
     await titleEscrowMock.deployed();
+    const MaliciousEscrow = await ethers.getContractFactory("MaliciousTitleEscrow");
 
     const TitleFlowFactory = await ethers.getContractFactory("TitleFlow");
     titleFlow = await TitleFlowFactory.deploy();
     await titleFlow.deployed();
 
+    maliciousEscrow = await MaliciousEscrow.deploy(titleFlow.address);
     await titleFlow.initialize(deployer.address, owner.address);
 
     expect(await titleFlow.attorney()).to.equal(deployer.address);
@@ -53,8 +56,8 @@ describe("TitleFlow", () => {
       const nonce = 0;
       const remark = ethers.utils.toUtf8Bytes("Nomination remark");
       const actionData = ethers.utils.defaultAbiCoder.encode(
-        ["address", "address", "address", "uint256", "uint8"],
-        [titleEscrowMock.address, nominee.address, zeroAddress, nonce, 0]
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, nominee.address, zeroAddress, nonce, 0]
       );
       const messageHash = ethers.utils.keccak256(actionData);
       const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
@@ -87,8 +90,8 @@ describe("TitleFlow", () => {
       const nonce = 0;
       const remark = ethers.utils.toUtf8Bytes("Nomination remark");
       const actionData = ethers.utils.defaultAbiCoder.encode(
-        ["address", "address", "address", "uint256", "uint8"],
-        [titleEscrowMock.address, nominee.address, zeroAddress, nonce, 0]
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, nominee.address, zeroAddress, nonce, 0]
       );
       const signature = await owner.signMessage(ethers.utils.arrayify(ethers.utils.keccak256(actionData)));
 
@@ -106,12 +109,40 @@ describe("TitleFlow", () => {
       );
     });
 
+    it("should succeed with non-empty remark", async () => {
+      const nonce = 0;
+      const remark = ethers.utils.toUtf8Bytes("Nomination remark");
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, nominee.address, zeroAddress, nonce, 0]
+      );
+      const messageHash = ethers.utils.keccak256(actionData);
+      const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
+
+      const tx = await titleFlow.connect(deployer).nominate(nominee.address, remark, titleEscrowMock.address, "0x", signature, nonce);
+    
+      const receipt = await tx.wait();
+
+      const event = receipt.events?.find(e => e.event === "Nomination");
+      expect(event).to.exist;
+      expect(event?.args?.prevNominee).to.equal(zeroAddress);
+      expect(event?.args?.nominee).to.equal(nominee.address);
+      expect(event?.args?.registry).to.equal(await titleEscrowMock.registry());
+      expect(event?.args?.tokenId).to.equal(await titleEscrowMock.tokenId());
+      expect(event?.args?.remark).to.equal(ethers.utils.hexlify(remark));
+
+      const newNonce = await titleFlow.nonce(titleEscrowMock.address, owner.address);
+      expect(newNonce).to.equal(1);
+
+      expect(await titleEscrowMock.nominee()).to.equal(nominee.address);
+    });
+
     it("should revert with InvalidNonce if nonce is incorrect", async () => {
       const nonce = 1;
       const remark = ethers.utils.toUtf8Bytes("Nomination remark");
       const actionData = ethers.utils.defaultAbiCoder.encode(
-        ["address", "address", "address", "uint256", "uint8"],
-        [titleEscrowMock.address, nominee.address, zeroAddress, nonce, 0]
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, nominee.address, zeroAddress, nonce, 0]
       );
       const signature = await owner.signMessage(ethers.utils.arrayify(ethers.utils.keccak256(actionData)));
 
@@ -131,151 +162,177 @@ describe("TitleFlow", () => {
       const nonce = 0;
       const remark = ethers.utils.toUtf8Bytes("Nomination remark");
       const actionData = ethers.utils.defaultAbiCoder.encode(
-        ["address", "address", "address", "uint256", "uint8"],
-        [titleEscrowMock.address, nominee.address, zeroAddress, nonce, 0]
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, nominee.address, zeroAddress, nonce, 0]
       );
-      const wrongSignature = await nonAdmin.signMessage(ethers.utils.arrayify(ethers.utils.keccak256(actionData)));
-
-    //   await expect(
-    //     titleFlow.connect(deployer).nominate(
-    //       nominee.address,
-    //       remark,
-    //       titleEscrowMock.address,
-    //       actionData,
-    //       wrongSignature,
-    //       nonce
-    //     )
-    //   ).to.be.revertedWithCustomError(titleFlow, "InvalidSigner")
+      const messageHash = ethers.utils.keccak256(actionData);
+      const wrongSignature = await nonAdmin.signMessage(ethers.utils.arrayify(messageHash));
+      await expect(titleFlow.connect(deployer).nominate(nominee.address, remark, titleEscrowMock.address, "0x", wrongSignature, nonce))
+      .to.be.revertedWith("InvalidSigner");
     });
 
-    it("should revert with InvalidOperationToZeroAddress if nominee is zero address", async () => {
+    it("should revert with signature for wrong contract address", async function () {
+      const nonce = 0;
+      const remark = ethers.utils.toUtf8Bytes("Nomination remark");
+      const wrongContractAddress = ethers.Wallet.createRandom().address;
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [wrongContractAddress, titleEscrowMock.address, nominee.address, zeroAddress, nonce, 0]
+      );
+      const signature = await owner.signMessage(ethers.utils.arrayify(ethers.utils.keccak256(actionData)));
+      await expect(titleFlow.connect(deployer).nominate(nominee.address, remark, titleEscrowMock.address, "0x", signature, nonce))
+        .to.be.revertedWith("InvalidSigner");
+    });
+
+    it("should revert for zero titleEscrow address", async function () {
+      const nonce = 0;
+      const remark = ethers.utils.toUtf8Bytes("Nomination remark");
+      const wrongContractAddress = ethers.Wallet.createRandom().address;
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [wrongContractAddress, titleEscrowMock.address, nominee.address, zeroAddress, nonce, 0]
+      );
+      const signature = await owner.signMessage(ethers.utils.arrayify(ethers.utils.keccak256(actionData)));
+  
+      await expect(
+        titleFlow.connect(deployer).nominate(nominee.address, remark, zeroAddress, "0x", signature, nonce)
+      ).to.be.revertedWith("InvalidOperationToZeroAddress");
+    });
+
+    it("should revert for non-contract titleEscrow", async function () {
       const nonce = 0;
       const remark = ethers.utils.toUtf8Bytes("Nomination remark");
       const actionData = ethers.utils.defaultAbiCoder.encode(
-        ["address", "address", "address", "uint256", "uint8"],
-        [titleEscrowMock.address, zeroAddress, zeroAddress, nonce, 0]
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, nominee.address, zeroAddress, nonce, 0]
+      );
+      const signature = await owner.signMessage(ethers.utils.arrayify(ethers.utils.keccak256(actionData)));
+  
+
+      await expect(
+        titleFlow.connect(deployer).nominate(nominee.address, remark, nonAdmin.address, "0x", signature, nonce)
+      ).to.be.revertedWith("InvalidOperationToZeroAddress");
+    });
+
+    ///////// Nonce Management
+    it("should revert with InvalidNonce if nonce is incorrect", async () => {
+      const nonce = 1;
+      const remark = ethers.utils.toUtf8Bytes("Nomination remark");
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, nominee.address, zeroAddress, nonce, 0]
       );
       const signature = await owner.signMessage(ethers.utils.arrayify(ethers.utils.keccak256(actionData)));
 
-    //   await expect(
-    //     titleFlow.connect(deployer).nominate(
-    //       zeroAddress,
-    //       remark,
-    //       titleEscrowMock.address,
-    //       actionData,
-    //       signature,
-    //       nonce
-    //     )
-    //   ).to.be.revertedWith("InvalidOperationToZeroAddress");
+      await expect(
+        titleFlow.connect(deployer).nominate(
+          nominee.address,
+          remark,
+          titleEscrowMock.address,
+          actionData,
+          signature,
+          nonce
+        )
+      ).to.be.revertedWith("InvalidNonce");
     });
 
-    it("should revert with InvalidOperationToZeroAddress if titleEscrow is zero address", async () => {
+    it("should revert with non-sequential nonce", async function () {
+      const nonce = 2;
+      const remark = ethers.utils.toUtf8Bytes("Nomination remark");
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, nominee.address, zeroAddress, nonce, 0]
+      );
+      const signature = await owner.signMessage(ethers.utils.arrayify(ethers.utils.keccak256(actionData)));
+      await expect(
+        titleFlow.connect(deployer).nominate(nominee.address, remark, titleEscrowMock.address, "0x", signature, nonce)
+      ).to.be.revertedWith("InvalidNonce");
+    });
+
+    it("should revert with zero nonce after increment", async function () {
       const nonce = 0;
       const remark = ethers.utils.toUtf8Bytes("Nomination remark");
       const actionData = ethers.utils.defaultAbiCoder.encode(
-        ["address", "address", "address", "uint256", "uint8"],
-        [zeroAddress, nominee.address, zeroAddress, nonce, 0]
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, nominee.address, zeroAddress, nonce, 0]
       );
       const signature = await owner.signMessage(ethers.utils.arrayify(ethers.utils.keccak256(actionData)));
+      // Perform successful nomination to increment nonce
+      await titleFlow.connect(deployer).nominate(nominee.address, remark, titleEscrowMock.address, "0x", signature, nonce);
 
-    //   await expect(
-    //     titleFlow.connect(deployer).nominate(
-    //       nominee.address,
-    //       remark,
-    //       zeroAddress,
-    //       actionData,
-    //       signature,
-    //       nonce
-    //     )
-    //   ).to.be.revertedWithCustomError(titleFlow, "InvalidOperationToZeroAddress");
+      // Attempt nomination with zero nonce again
+      const newActionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, nominee.address, zeroAddress, 0, 0]
+      );
+      const newSignature = await owner.signMessage(ethers.utils.arrayify(ethers.utils.keccak256(newActionData)));
+
+      await expect(
+        titleFlow.connect(deployer).nominate(nominee.address, remark, titleEscrowMock.address, "0x", newSignature, 0)
+      ).to.be.revertedWith("InvalidNonce");
     });
 
-    it("should revert with ActionFailed if titleEscrow call fails", async () => {
-      await titleEscrowMock.setShouldFail(true);
-
+    ///////// Reentrancy Protection
+    it("should revert on reentrant call", async function () {
       const nonce = 0;
       const remark = ethers.utils.toUtf8Bytes("Nomination remark");
       const actionData = ethers.utils.defaultAbiCoder.encode(
-        ["address", "address", "address", "uint256", "uint8"],
-        [titleEscrowMock.address, nominee.address, zeroAddress, nonce, 0]
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, maliciousEscrow.address, nominee.address, zeroAddress, nonce, 0]
+      );
+      const signature = await owner.signMessage(ethers.utils.arrayify(ethers.utils.keccak256(actionData)));
+    
+      await expect(
+        titleFlow.connect(deployer).nominate(nominee.address, remark, maliciousEscrow.address, "0x", signature, nonce)
+      ).to.be.revertedWith("Nominate failed");
+    });
+
+    ///////// Edge Cases    
+    it("should succeed with large remark", async function () {
+      const nonce = 0;
+      const largeRemark = ethers.utils.hexlify(ethers.utils.randomBytes(1024));
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, nominee.address, zeroAddress, nonce, 0]
       );
       const signature = await owner.signMessage(ethers.utils.arrayify(ethers.utils.keccak256(actionData)));
 
-    //   await expect(
-    //     titleFlow.connect(deployer).nominate(
-    //       nominee.address,
-    //       remark,
-    //       titleEscrowMock.address,
-    //       actionData,
-    //       signature,
-    //       nonce
-    //     )
-    //   ).to.be.revertedWithCustomError(titleFlow, "ActionFailed")
-    //     .withArgs("Nominate failed");
+      const tx = await titleFlow.connect(deployer).nominate(nominee.address, largeRemark, titleEscrowMock.address, "0x", signature, nonce);
+      const receipt = await tx.wait();
+
+      const event = receipt.events?.find(e => e.event === "Nomination");
+      expect(event?.args?.nominee).to.equal(nominee.address);
+      expect(event?.args?.remark).to.equal(largeRemark);
+      expect(await titleFlow.nonce(titleEscrowMock.address, owner.address)).to.equal(1);
     });
 
-    // it("should prevent reentrancy", async () => {
-    //   const MaliciousFactory = await ethers.getContractFactory(MaliciousArtifact.abi, MaliciousArtifact.bytecode);
-    //   const malicious = await MaliciousFactory.deploy(titleFlow.address);
-    //   await malicious.deployed();
+    it("should revert with invalid signature length", async function () {
+      const nonce = 0;
+      const remark = ethers.utils.toUtf8Bytes("Nomination remark");
+      const invalidSignature = "0x1234"; // <65 bytes
 
-    //   const nonce = 0;
-    //   const remark = ethers.utils.toUtf8Bytes("Nomination remark");
-    //   const actionData = ethers.utils.defaultAbiCoder.encode(
-    //     ["address", "address", "address", "uint256", "uint8"],
-    //     [malicious.address, nominee.address, zeroAddress, nonce, 0]
-    //   );
-    //   const signature = await owner.signMessage(ethers.utils.arrayify(ethers.utils.keccak256(actionData)));
+      await expect(
+        titleFlow.connect(deployer).nominate(nominee.address, remark, titleEscrowMock.address, "0x", invalidSignature, nonce)
+      ).to.be.revertedWith("InvalidSignatureLength");
+    });
 
-    //   await expect(
-    //     titleFlow.connect(deployer).nominate(
-    //       nominee.address,
-    //       remark,
-    //       malicious.address,
-    //       actionData,
-    //       signature,
-    //       nonce
-    //     )
-    //   ).to.be.revertedWith("ReentrancyGuard: reentrant call");
-    // });
+    it("should revert with maximum nonce value", async function () {
+      const maxNonce = ethers.BigNumber.from("2").pow(256).sub(1);
+      const remark = ethers.utils.toUtf8Bytes("Nomination remark");
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, nominee.address, zeroAddress, maxNonce, 0]
+      );
+      const signature = await owner.signMessage(ethers.utils.arrayify(ethers.utils.keccak256(actionData)));
+
+      await expect(
+        titleFlow.connect(deployer).nominate(nominee.address, remark, titleEscrowMock.address, "0x", signature, maxNonce)
+      ).to.be.revertedWith("InvalidNonce");
+    });
+
   });
 
-  describe("transferBeneficiary()", () => {
-    it("should successfully transfer beneficiary with valid signature and emit BeneficiaryTransfer event", async () => {
-        const nonce = 0;
-        const remark = ethers.utils.toUtf8Bytes("Beneficiary transfer remark");
-        const actionData = ethers.utils.defaultAbiCoder.encode(
-            ["address", "address", "address", "uint256", "uint8"],
-            [titleEscrowMock.address, nominee.address, zeroAddress, nonce, 1]
-        );
-        const messageHash = ethers.utils.keccak256(actionData);
-        const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
-    
-        const tx = await titleFlow.connect(deployer).transferBeneficiary(
-            nominee.address,
-            remark,
-            titleEscrowMock.address,
-            actionData,
-            signature,
-            nonce
-        );
-        const receipt = await tx.wait();
-    
-        const event = receipt.events?.find((e) => e.event === "BeneficiaryTransfer");
-        expect(event).to.exist;
-        expect(event?.args?.fromBeneficiary).to.equal(owner.address);
-        expect(event?.args?.toBeneficiary).to.equal(nominee.address);
-        expect(event?.args?.registry).to.equal(titleEscrowMock.address);
-        expect(event?.args?.tokenId).to.equal(42);
-        expect(event?.args?.remark).to.equal(ethers.utils.hexlify(remark));
-    
-        expect(await titleFlow.nonce(titleEscrowMock.address, owner.address)).to.equal(1);
-        expect(await titleEscrowMock.beneficiary()).to.equal(nominee.address);
-    });  
-  });
-});
-
-describe("TitleFlow - transferHolder", () => {
+  describe("transferHolder()", () => {
     let titleFlow: TitleFlow;
     let titleEscrowMock: TitleEscrowMock;
     let deployer: SignerWithAddress;
@@ -316,8 +373,8 @@ describe("TitleFlow - transferHolder", () => {
       const nonce = 0;
       const remark = ethers.utils.toUtf8Bytes("Holder transfer remark");
       const actionData = ethers.utils.defaultAbiCoder.encode(
-        ["address", "address", "address", "uint256", "uint8"],
-        [titleEscrowMock.address, zeroAddress, newHolder.address, nonce, 2]
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, zeroAddress, newHolder.address, nonce, 2]
       );
       const messageHash = ethers.utils.keccak256(actionData);
       const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
@@ -343,9 +400,231 @@ describe("TitleFlow - transferHolder", () => {
       expect(await titleFlow.nonce(titleEscrowMock.address, owner.address)).to.equal(1);
       expect(await titleEscrowMock.holder()).to.equal(newHolder.address);
     });
+
+    it("should revert for non-attorney caller", async function () {
+      const nonce = 0;
+      const remark = ethers.utils.toUtf8Bytes("Holder transfer remark");
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, zeroAddress, newHolder.address, nonce, 2]
+      );
+      const messageHash = ethers.utils.keccak256(actionData);
+      const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
+  
+      await expect(titleFlow.connect(nonAdmin).transferHolder(newHolder.address, remark, titleEscrowMock.address, "0x", signature, nonce))
+        .to.be.revertedWith(`AccessControl: account ${nonAdmin.address.toLowerCase()} is missing role ${ATTORNEY_ADMIN_ROLE}`);
+    });
+
+    it("should revert for revoked attorney", async function () {
+      await titleFlow.connect(owner).revokeRole(ATTORNEY_ADMIN_ROLE, deployer.address);
+  
+      const nonce = 0;
+      const remark = ethers.utils.toUtf8Bytes("Holder transfer remark");
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, zeroAddress, newHolder.address, nonce, 2]
+      );
+      const messageHash = ethers.utils.keccak256(actionData);
+      const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
+  
+      const expectedError = `AccessControl: account ${deployer.address.toLowerCase()} is missing role ${await titleFlow.ATTORNEY_ADMIN_ROLE()}`;
+      await expect(
+        titleFlow.connect(deployer).transferHolder(newHolder.address, remark, titleEscrowMock.address, "0x", signature, nonce)
+      ).to.be.revertedWith(expectedError);
+    });
+
+    it("should succeed with empty remark data", async function () {
+      const nonce = 0;
+      const remark = "0x";
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, zeroAddress, newHolder.address, nonce, 2]
+      );
+      const messageHash = ethers.utils.keccak256(actionData);
+      const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
+  
+      const tx = await titleFlow.connect(deployer).transferHolder(newHolder.address, remark, titleEscrowMock.address, "0x", signature, nonce);
+      const receipt = await tx.wait();
+      const event = receipt.events?.find((e) => e.event === "HolderTransfer");
+      expect(event?.args?.remark).to.equal(remark);
+      expect(await titleFlow.nonce(titleEscrowMock.address, owner.address)).to.equal(1);
+    });
+
+    it("should revert for zero newHolder address", async function () {
+      const nonce = 0;
+      const remark = ethers.utils.toUtf8Bytes("Holder transfer error");
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, zeroAddress, newHolder.address, nonce, 2]
+      );
+      const messageHash = ethers.utils.keccak256(actionData);
+      const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
+  
+      await expect(titleFlow.connect(deployer).transferHolder(zeroAddress, remark, titleEscrowMock.address, "0x", signature, nonce))
+        .to.be.revertedWith("InvalidOperationToZeroAddress");
+    });
+
+    it("should revert for zero titleEscrow address", async function () {
+      const nonce = 0;
+      const remark = ethers.utils.toUtf8Bytes("Holder transfer error");
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, zeroAddress, newHolder.address, nonce, 2]
+      );
+      const messageHash = ethers.utils.keccak256(actionData);
+      const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
+  
+      await expect(titleFlow.connect(deployer).transferHolder(newHolder.address, remark, zeroAddress, "0x", signature, nonce))
+        .to.be.revertedWith("InvalidOperationToZeroAddress");
+    });
+
+    it("should revert for non-contract titleEscrow", async function () {
+      const nonce = 0;
+      const remark = ethers.utils.toUtf8Bytes("Holder transfer error");
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, zeroAddress, newHolder.address, nonce, 2]
+      );
+      const messageHash = ethers.utils.keccak256(actionData);
+      const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
+  
+      await expect(titleFlow.connect(deployer).transferHolder(newHolder.address, remark, nonAdmin.address, "0x", signature, nonce))
+        .to.be.revertedWith("InvalidOperationToZeroAddress");
+    });
+
+    it("should revert with invalid signature", async function () {
+      const nonce = 0;
+      const remark = ethers.utils.toUtf8Bytes("Holder transfer error");
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, zeroAddress, newHolder.address, nonce, 1]
+      );
+      const messageHash = ethers.utils.keccak256(actionData);
+      const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
+  
+      await expect(titleFlow.connect(deployer).transferHolder(newHolder.address, remark, titleEscrowMock.address, "0x", signature, nonce))
+        .to.be.revertedWith("InvalidSigner");
+    });
+
+    it("should revert with tampered signature", async function () {
+      const nonce = 0;
+      const remark = ethers.utils.toUtf8Bytes("Holder transfer error");
+      const wrongHolder = nonAdmin.address;
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, zeroAddress, wrongHolder, nonce, 1]
+      );
+      const messageHash = ethers.utils.keccak256(actionData);
+      const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
+      await expect(titleFlow.connect(deployer).transferHolder(newHolder.address, remark, titleEscrowMock.address, "0x", signature, nonce))
+        .to.be.revertedWith("InvalidSigner");
+    });
+  
+    it("should revert with signature for wrong contract address", async function () {
+      const nonce = 0;
+      const remark = ethers.utils.toUtf8Bytes("Holder transfer error");
+      const wrongContractAddress = ethers.Wallet.createRandom().address;
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [wrongContractAddress, titleEscrowMock.address, zeroAddress, newHolder.address, nonce, 1]
+      );
+      const messageHash = ethers.utils.keccak256(actionData);
+      const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
+  
+      await expect(titleFlow.connect(deployer).transferHolder(newHolder.address, remark, titleEscrowMock.address, "0x", signature, nonce))
+        .to.be.revertedWith("InvalidSigner");
+    });
+
+    it("should revert with reused nonce", async function () {
+      const nonce = 0;
+      const remark = ethers.utils.toUtf8Bytes("Holder transfer error");
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, zeroAddress, newHolder.address, nonce, 2]
+      );
+      const messageHash = ethers.utils.keccak256(actionData);
+      const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
+  
+      await titleFlow.connect(deployer).transferHolder(newHolder.address, remark, titleEscrowMock.address, "0x", signature, nonce);      
+  
+      await expect(titleFlow.connect(deployer).transferHolder(newHolder.address, remark, titleEscrowMock.address, "0x", signature, nonce))
+        .to.be.revertedWith("InvalidNonce");
+    });
+    
+    it("should revert with non-sequential nonce", async function () {
+      const nonce = 2;
+      const remark = ethers.utils.toUtf8Bytes("Holder transfer error");
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, zeroAddress, newHolder.address, nonce, 2]
+      );
+      const messageHash = ethers.utils.keccak256(actionData);
+      const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
+  
+      await expect(titleFlow.connect(deployer).transferHolder(newHolder.address, remark, titleEscrowMock.address, "0x", signature, nonce))
+        .to.be.revertedWith("InvalidNonce");
+    });
+  
+    it("should revert with zero nonce after increment", async function () {
+      const nonce = 0;
+      const remark = ethers.utils.toUtf8Bytes("Holder transfer error");
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, zeroAddress, newHolder.address, nonce, 2]
+      );
+      const messageHash = ethers.utils.keccak256(actionData);
+      const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
+  
+      await titleFlow.connect(deployer).transferHolder(newHolder.address, remark, titleEscrowMock.address, "0x", signature, nonce);
+  
+      const newActionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, zeroAddress, newHolder.address, 0, 2]
+      );
+      const newMessageHash = ethers.utils.keccak256(newActionData);
+      const newSignature = await owner.signMessage(ethers.utils.arrayify(newMessageHash));
+  
+      await expect(titleFlow.connect(deployer).transferHolder(newHolder.address, remark, titleEscrowMock.address, "0x", newSignature, 0))
+        .to.be.revertedWith("InvalidNonce");
+    });
+
   });
 
-  describe("TitleFlow - transferOwners", () => {
+  describe("transferBeneficiary()", () => {
+    it("should successfully transfer beneficiary with valid signature and emit BeneficiaryTransfer event", async () => {
+        const nonce = 0;
+        const remark = ethers.utils.toUtf8Bytes("Beneficiary transfer remark");
+        const actionData = ethers.utils.defaultAbiCoder.encode(
+          ["address", "address", "address", "address", "uint256", "uint8"],
+          [titleFlow.address, titleEscrowMock.address, nominee.address, zeroAddress, nonce, 1]
+        );
+        const messageHash = ethers.utils.keccak256(actionData);
+        const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
+    
+        const tx = await titleFlow.connect(deployer).transferBeneficiary(
+            nominee.address,
+            remark,
+            titleEscrowMock.address,
+            actionData,
+            signature,
+            nonce
+        );
+        const receipt = await tx.wait();
+    
+        const event = receipt.events?.find((e) => e.event === "BeneficiaryTransfer");
+        expect(event).to.exist;
+        expect(event?.args?.fromBeneficiary).to.equal(owner.address);
+        expect(event?.args?.toBeneficiary).to.equal(nominee.address);
+        expect(event?.args?.registry).to.equal(titleEscrowMock.address);
+        expect(event?.args?.tokenId).to.equal(42);
+        expect(event?.args?.remark).to.equal(ethers.utils.hexlify(remark));
+    
+        expect(await titleFlow.nonce(titleEscrowMock.address, owner.address)).to.equal(1);
+        expect(await titleEscrowMock.beneficiary()).to.equal(nominee.address);
+    });  
+  });
+
+  describe("transferOwners()", () => {
     let titleFlow: TitleFlow;
     let titleEscrowMock: TitleEscrowMock;
     let deployer: SignerWithAddress; // Attorney (admin)
@@ -390,8 +669,8 @@ describe("TitleFlow - transferHolder", () => {
       const nonce = 0;
       const remark = ethers.utils.toUtf8Bytes("Owners transfer remark");
       const actionData = ethers.utils.defaultAbiCoder.encode(
-        ["address", "address", "address", "uint256", "uint8"],
-        [titleEscrowMock.address, nominee.address, newHolder.address, nonce, 3] // ActionType.OwnersTransfer = 3
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, nominee.address, newHolder.address, nonce, 3] // ActionType.OwnersTransfer = 3
       );
       const messageHash = ethers.utils.keccak256(actionData);
       const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
@@ -425,7 +704,7 @@ describe("TitleFlow - transferHolder", () => {
   });
 
 
-  describe("TitleFlow - rejectTransferBeneficiary", () => {
+  describe("rejectTransferBeneficiary()", () => {
     let titleFlow: TitleFlow;
     let titleEscrowMock: TitleEscrowMock;
     let deployer: SignerWithAddress;
@@ -467,8 +746,8 @@ describe("TitleFlow - transferHolder", () => {
       const nonce = 0;
       const remark = ethers.utils.toUtf8Bytes("Reject beneficiary remark");
       const actionData = ethers.utils.defaultAbiCoder.encode(
-        ["address", "address", "address", "uint256", "uint8"],
-        [titleEscrowMock.address, zeroAddress, zeroAddress, nonce, 4]
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, zeroAddress, zeroAddress, nonce, 4]
       );
       const messageHash = ethers.utils.keccak256(actionData);
       const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
@@ -495,7 +774,7 @@ describe("TitleFlow - transferHolder", () => {
     });
   });
 
-  describe("TitleFlow - rejectTransferHolder", () => {
+  describe("rejectTransferHolder()", () => {
     let titleFlow: TitleFlow;
     let titleEscrowMock: TitleEscrowMock;
     let deployer: SignerWithAddress; // Attorney (admin)
@@ -538,8 +817,8 @@ describe("TitleFlow - transferHolder", () => {
       const nonce = 0;
       const remark = ethers.utils.toUtf8Bytes("Reject holder remark");
       const actionData = ethers.utils.defaultAbiCoder.encode(
-        ["address", "address", "address", "uint256", "uint8"],
-        [titleEscrowMock.address, zeroAddress, zeroAddress, nonce, 5] // ActionType.RejectHolder = 5
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, zeroAddress, zeroAddress, nonce, 5]
       );
       const messageHash = ethers.utils.keccak256(actionData);
       const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
@@ -570,7 +849,7 @@ describe("TitleFlow - transferHolder", () => {
     });
   });
 
-  describe("TitleFlow - rejectTransferOwners", () => {
+  describe("rejectTransferOwners()", () => {
     let titleFlow: TitleFlow;
     let titleEscrowMock: TitleEscrowMock;
     let deployer: SignerWithAddress; // Attorney (admin)
@@ -616,8 +895,8 @@ describe("TitleFlow - transferHolder", () => {
       const nonce = 0;
       const remark = ethers.utils.toUtf8Bytes("Reject owners remark");
       const actionData = ethers.utils.defaultAbiCoder.encode(
-        ["address", "address", "address", "uint256", "uint8"],
-        [titleEscrowMock.address, zeroAddress, zeroAddress, nonce, 6] // ActionType.RejectOwners = 6
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, zeroAddress, zeroAddress, nonce, 6] // ActionType.RejectOwners = 6
       );
       const messageHash = ethers.utils.keccak256(actionData);
       const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
@@ -651,145 +930,151 @@ describe("TitleFlow - transferHolder", () => {
     });
   });
 
-describe("TitleFlow - returnToIssuer", () => {
-  let titleFlow: TitleFlow;
-  let titleEscrowMock: TitleEscrowMock;
-  let deployer: SignerWithAddress; // Attorney (admin)
-  let owner: SignerWithAddress;    // Owner who signs actions
+  describe("returnToIssuer()", () => {
+    let titleFlow: TitleFlow;
+    let titleEscrowMock: TitleEscrowMock;
+    let deployer: SignerWithAddress; // Attorney (admin)
+    let owner: SignerWithAddress;    // Owner who signs actions
 
-  const ATTORNEY_ADMIN_ROLE = ethers.utils.keccak256(ethers.utils.toUtf8Bytes("ATTORNEY_ADMIN_ROLE"));
-  const zeroAddress = ethers.constants.AddressZero;
+    const ATTORNEY_ADMIN_ROLE = ethers.utils.keccak256(ethers.utils.toUtf8Bytes("ATTORNEY_ADMIN_ROLE"));
+    const zeroAddress = ethers.constants.AddressZero;
 
-  beforeEach(async () => {
-    [deployer, owner] = await ethers.getSigners();
+    beforeEach(async () => {
+      [deployer, owner] = await ethers.getSigners();
 
-    const TitleEscrowMockFactory = await ethers.getContractFactory("TitleEscrowMock");
-    titleEscrowMock = await TitleEscrowMockFactory.deploy();
-    await titleEscrowMock.deployed();
+      const TitleEscrowMockFactory = await ethers.getContractFactory("TitleEscrowMock");
+      titleEscrowMock = await TitleEscrowMockFactory.deploy();
+      await titleEscrowMock.deployed();
 
-    const TitleFlowFactory = await ethers.getContractFactory("TitleFlow");
-    titleFlow = await TitleFlowFactory.deploy();
-    await titleFlow.deployed();
+      const TitleFlowFactory = await ethers.getContractFactory("TitleFlow");
+      titleFlow = await TitleFlowFactory.deploy();
+      await titleFlow.deployed();
 
-    await titleFlow.initialize(deployer.address, owner.address);
+      await titleFlow.initialize(deployer.address, owner.address);
 
-    // Set initial state
-    await titleEscrowMock.setState(
-      owner.address,        // Beneficiary
-      deployer.address,     // Holder
-      zeroAddress,
-      zeroAddress,
-      zeroAddress,
-      true,                 // Active
-      titleEscrowMock.address,
-      42
-    );
+      // Set initial state
+      await titleEscrowMock.setState(
+        owner.address,        // Beneficiary
+        deployer.address,     // Holder
+        zeroAddress,
+        zeroAddress,
+        zeroAddress,
+        true,                 // Active
+        titleEscrowMock.address,
+        42
+      );
 
-    expect(await titleEscrowMock.active()).to.be.true;
+      expect(await titleEscrowMock.active()).to.be.true;
+    });
+
+    it("should successfully return to issuer with valid signature and emit ReturnToIssuer event", async () => {
+      const nonce = 0;
+      const remark = ethers.utils.toUtf8Bytes("Return to issuer remark");
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, zeroAddress, zeroAddress, nonce, 7] // ActionType.ReturnToIssuer = 7
+      );
+      
+      const messageHash = ethers.utils.keccak256(actionData);
+      const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
+
+      const tx = await titleFlow.connect(deployer).returnToIssuer(
+        remark,
+        titleEscrowMock.address,
+        actionData,
+        signature,
+        nonce
+      );
+      const receipt = await tx.wait();
+
+      // Verify event
+      const event = receipt.events?.find((e) => e.event === "ReturnToIssuer");
+      expect(event).to.exist;
+      expect(event?.args?.caller).to.equal(deployer.address);
+      expect(event?.args?.registry).to.equal(titleEscrowMock.address);
+      expect(event?.args?.tokenId).to.equal(42);
+      expect(event?.args?.remark).to.equal(ethers.utils.hexlify(remark));
+
+      // Verify nonce increment
+      expect(await titleFlow.nonce(titleEscrowMock.address, owner.address)).to.equal(1);
+
+      // Verify mock state (active set to false)
+      expect(await titleEscrowMock.active()).to.be.false;
+    });
   });
 
-  it("should successfully return to issuer with valid signature and emit ReturnToIssuer event", async () => {
-    const nonce = 0;
-    const remark = ethers.utils.toUtf8Bytes("Return to issuer remark");
-    const actionData = ethers.utils.defaultAbiCoder.encode(
-      ["address", "address", "address", "uint256", "uint8"],
-      [titleEscrowMock.address, zeroAddress, zeroAddress, nonce, 7] // ActionType.ReturnToIssuer = 7
-    );
-    const messageHash = ethers.utils.keccak256(actionData);
-    const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
+  describe("shred()", () => {
+    let titleFlow: TitleFlow;
+    let titleEscrowMock: TitleEscrowMock;
+    let deployer: SignerWithAddress; // Attorney (admin)
+    let owner: SignerWithAddress;    // Owner who signs actions
 
-    const tx = await titleFlow.connect(deployer).returnToIssuer(
-      remark,
-      titleEscrowMock.address,
-      actionData,
-      signature,
-      nonce
-    );
-    const receipt = await tx.wait();
+    const ATTORNEY_ADMIN_ROLE = ethers.utils.keccak256(ethers.utils.toUtf8Bytes("ATTORNEY_ADMIN_ROLE"));
+    const zeroAddress = ethers.constants.AddressZero;
 
-    // Verify event
-    const event = receipt.events?.find((e) => e.event === "ReturnToIssuer");
-    expect(event).to.exist;
-    expect(event?.args?.caller).to.equal(deployer.address);
-    expect(event?.args?.registry).to.equal(titleEscrowMock.address);
-    expect(event?.args?.tokenId).to.equal(42);
-    expect(event?.args?.remark).to.equal(ethers.utils.hexlify(remark));
+    beforeEach(async () => {
+      [deployer, owner] = await ethers.getSigners();
 
-    // Verify nonce increment
-    expect(await titleFlow.nonce(titleEscrowMock.address, owner.address)).to.equal(1);
+      const TitleEscrowMockFactory = await ethers.getContractFactory("TitleEscrowMock");
+      titleEscrowMock = await TitleEscrowMockFactory.deploy();
+      await titleEscrowMock.deployed();
 
-    // Verify mock state (active set to false)
-    expect(await titleEscrowMock.active()).to.be.false;
+      const TitleFlowFactory = await ethers.getContractFactory("TitleFlow");
+      titleFlow = await TitleFlowFactory.deploy();
+      await titleFlow.deployed();
+
+      await titleFlow.initialize(deployer.address, owner.address);
+
+      // Set initial state
+      await titleEscrowMock.setState(
+        owner.address,        // Beneficiary
+        deployer.address,     // Holder
+        zeroAddress,
+        zeroAddress,
+        zeroAddress,
+        true,                 // Active
+        titleEscrowMock.address,
+        42
+      );
+
+      expect(await titleEscrowMock.active()).to.be.true;
+    });
+
+    it("should successfully shred with valid signature and emit Shred event", async () => {
+      const nonce = 0;
+      const remark = ethers.utils.toUtf8Bytes("Shred remark");
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, zeroAddress, zeroAddress, nonce, 8] // ActionType.Shred = 8
+      );
+      const messageHash = ethers.utils.keccak256(actionData);
+      const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
+
+      const tx = await titleFlow.connect(deployer).shred(
+        remark,
+        titleEscrowMock.address,
+        actionData,
+        signature,
+        nonce
+      );
+      const receipt = await tx.wait();
+
+      // Verify event
+      const event = receipt.events?.find((e) => e.event === "Shred");
+      expect(event).to.exist;
+      expect(event?.args?.registry).to.equal(titleEscrowMock.address);
+      expect(event?.args?.tokenId).to.equal(42);
+      expect(event?.args?.remark).to.equal(ethers.utils.hexlify(remark));
+
+      // Verify nonce increment
+      expect(await titleFlow.nonce(titleEscrowMock.address, owner.address)).to.equal(1);
+
+      // Verify mock state (active set to false)
+      expect(await titleEscrowMock.active()).to.be.false;
+    });
   });
+
 });
 
-describe("TitleFlow - shred", () => {
-  let titleFlow: TitleFlow;
-  let titleEscrowMock: TitleEscrowMock;
-  let deployer: SignerWithAddress; // Attorney (admin)
-  let owner: SignerWithAddress;    // Owner who signs actions
 
-  const ATTORNEY_ADMIN_ROLE = ethers.utils.keccak256(ethers.utils.toUtf8Bytes("ATTORNEY_ADMIN_ROLE"));
-  const zeroAddress = ethers.constants.AddressZero;
-
-  beforeEach(async () => {
-    [deployer, owner] = await ethers.getSigners();
-
-    const TitleEscrowMockFactory = await ethers.getContractFactory("TitleEscrowMock");
-    titleEscrowMock = await TitleEscrowMockFactory.deploy();
-    await titleEscrowMock.deployed();
-
-    const TitleFlowFactory = await ethers.getContractFactory("TitleFlow");
-    titleFlow = await TitleFlowFactory.deploy();
-    await titleFlow.deployed();
-
-    await titleFlow.initialize(deployer.address, owner.address);
-
-    // Set initial state
-    await titleEscrowMock.setState(
-      owner.address,        // Beneficiary
-      deployer.address,     // Holder
-      zeroAddress,
-      zeroAddress,
-      zeroAddress,
-      true,                 // Active
-      titleEscrowMock.address,
-      42
-    );
-
-    expect(await titleEscrowMock.active()).to.be.true;
-  });
-
-  it("should successfully shred with valid signature and emit Shred event", async () => {
-    const nonce = 0;
-    const remark = ethers.utils.toUtf8Bytes("Shred remark");
-    const actionData = ethers.utils.defaultAbiCoder.encode(
-      ["address", "address", "address", "uint256", "uint8"],
-      [titleEscrowMock.address, zeroAddress, zeroAddress, nonce, 8] // ActionType.Shred = 8
-    );
-    const messageHash = ethers.utils.keccak256(actionData);
-    const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
-
-    const tx = await titleFlow.connect(deployer).shred(
-      remark,
-      titleEscrowMock.address,
-      actionData,
-      signature,
-      nonce
-    );
-    const receipt = await tx.wait();
-
-    // Verify event
-    const event = receipt.events?.find((e) => e.event === "Shred");
-    expect(event).to.exist;
-    expect(event?.args?.registry).to.equal(titleEscrowMock.address);
-    expect(event?.args?.tokenId).to.equal(42);
-    expect(event?.args?.remark).to.equal(ethers.utils.hexlify(remark));
-
-    // Verify nonce increment
-    expect(await titleFlow.nonce(titleEscrowMock.address, owner.address)).to.equal(1);
-
-    // Verify mock state (active set to false)
-    expect(await titleEscrowMock.active()).to.be.false;
-  });
-});
+  
