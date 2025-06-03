@@ -47,6 +47,7 @@ contract TitleFlow is ITitleFlow, AccessControl, TitleEscrowErrorsV2, Initializa
     /// @notice Initializes the contract with attorney and owner addresses
     function initialize(address _attorney, address _owner) override public virtual initializer {
         _setupRole(ATTORNEY_ADMIN_ROLE, _attorney);
+        _setupRole(DEFAULT_ADMIN_ROLE, _owner); // Ensure this line exists
         __TitleFlow_init(_attorney, _owner);
     }
 
