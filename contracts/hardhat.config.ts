@@ -48,7 +48,7 @@ const config: HardhatUserConfig = {
   solidity: {
     compilers: [
       {
-        version: "0.8.4",
+        version: "0.8.22",
         settings:{
           optimizer: {
             enabled: true,
@@ -70,10 +70,10 @@ const config: HardhatUserConfig = {
   },
   networks: {
     
-    hedera :{
-      url: process.env.HEDERA_TEST_NETWORK_URL,
+    testnet :{
+      url: process.env.RPC_URL,
       chainId: 296,
-      accounts: process.env.HEDERA_PRIVATE_KEY !== undefined ? [process.env.HEDERA_PRIVATE_KEY] : [],
+      accounts: process.env.OPERATOR_KEY !== undefined ? [process.env.OPERATOR_KEY] : [],
       timeout: 60000
     },
     hardhat: {

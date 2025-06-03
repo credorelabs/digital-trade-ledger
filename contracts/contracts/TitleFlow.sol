@@ -13,6 +13,11 @@ import "./interfaces/ITitleFlow.sol";
 import "./interfaces/ITitleEscrowV2.sol";
 import "./interfaces/TitleEscrowErrorsV2.sol";
 
+/**
+ * @title TitleFlow
+ * @dev Gasless implementation for managing title escrow operations, enabling entities to interact without holding blockchain native tokens.
+ *      Internally calls the TradeTrust TitleEscrow smart contract to facilitate secure and verifiable digital trade asset management.
+ */
 contract TitleFlow is ITitleFlow, AccessControl, TitleEscrowErrorsV2, Initializable, ReentrancyGuard, IERC721Receiver{
     using Address for address;
     using ECDSA for bytes32;
@@ -311,13 +316,6 @@ contract TitleFlow is ITitleFlow, AccessControl, TitleEscrowErrorsV2, Initializa
         if (signer == address(0)) revert InvalidSignature();
         return signer == approver;
     }
-
-    // function _verifyApprover(address approver, bytes memory data, bytes memory signature) private pure returns (bool) {
-    //     bytes32 messageHash = keccak256(abi.encodePacked(data));
-    //     bytes32 ethSignedMessageHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash));
-    //     address signer = recoverSigner(ethSignedMessageHash, signature);
-    //     return signer != address(0) && signer == approver;
-    // }
 
     function recoverSigner(bytes32 _ethSignedMessageHash, bytes memory _signature) private pure returns (address) {
         (bytes32 r, bytes32 s, uint8 v) = splitSignature(_signature);
