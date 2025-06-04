@@ -11,13 +11,13 @@ describe("TitleFlow", () => {
   let owner: SignerWithAddress;
   let nominee: SignerWithAddress;
   let nonAdmin: SignerWithAddress;
-  let newHolder: SignerWithAddress; // New holder
+  let unauthorized: SignerWithAddress; 
 
   const ATTORNEY_ADMIN_ROLE = ethers.utils.keccak256(ethers.utils.toUtf8Bytes("ATTORNEY_ADMIN_ROLE"));
   const zeroAddress = ethers.constants.AddressZero;
 
   beforeEach(async () => {
-    [deployer, owner, nominee, nonAdmin] = await ethers.getSigners();
+    [deployer, owner, nominee, nonAdmin, unauthorized] = await ethers.getSigners();
 
     const TitleEscrowMockFactory = await ethers.getContractFactory("TitleEscrowMock");
     titleEscrowMock = await TitleEscrowMockFactory.deploy();
@@ -622,6 +622,368 @@ describe("TitleFlow", () => {
         expect(await titleFlow.nonce(titleEscrowMock.address, owner.address)).to.equal(1);
         expect(await titleEscrowMock.beneficiary()).to.equal(nominee.address);
     });  
+
+    it("should revert when called by unauthorized account without ATTORNEY_ADMIN_ROLE", async () => {
+      // Validate initial state
+      const ATTORNEY_ADMIN_ROLE = await titleFlow.ATTORNEY_ADMIN_ROLE();
+      expect(
+        await titleFlow.hasRole(ATTORNEY_ADMIN_ROLE, deployer.address),
+        "Deployer does not have ATTORNEY_ADMIN_ROLE"
+      ).to.be.true;
+      expect(
+        await titleFlow.hasRole(ATTORNEY_ADMIN_ROLE, unauthorized.address),
+        "Unauthorized account has ATTORNEY_ADMIN_ROLE"
+      ).to.be.false;
+      expect(await titleEscrowMock.beneficiary(), "Initial beneficiary incorrect").to.equal(owner.address);
+  
+      // Prepare transfer parameters
+      const remark = ethers.utils.toUtf8Bytes("Beneficiary transfer remark");
+      const nonce = ethers.BigNumber.from(0);
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, nominee.address, ethers.constants.AddressZero, nonce, 1]
+      );
+  
+      // Generate signature
+      const messageHash = ethers.utils.keccak256(actionData);
+      const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
+  
+      // Attempt transfer by unauthorized account
+      await expect(
+        titleFlow
+          .connect(unauthorized)
+          .transferBeneficiary(nominee.address, remark, titleEscrowMock.address, actionData, signature, nonce)
+      ).to.be.revertedWith(`AccessControl: account ${unauthorized.address.toLowerCase()} is missing role ${ATTORNEY_ADMIN_ROLE}`)
+  
+      // Verify state unchanged
+      expect(await titleEscrowMock.beneficiary(), "Beneficiary incorrectly changed").to.equal(owner.address);
+      expect(
+        await titleFlow.nonce(titleEscrowMock.address, owner.address),
+        "Nonce incorrectly incremented"
+      ).to.equal(0);
+    });
+
+    it("should revert when nominee is zero address", async () => {
+      // Validate initial state
+      const ATTORNEY_ADMIN_ROLE = await titleFlow.ATTORNEY_ADMIN_ROLE();
+      expect(
+        await titleFlow.hasRole(ATTORNEY_ADMIN_ROLE, deployer.address),
+        "Deployer does not have ATTORNEY_ADMIN_ROLE"
+      ).to.be.true;
+      expect(await titleEscrowMock.beneficiary(), "Initial beneficiary incorrect").to.equal(owner.address);
+  
+      // Prepare transfer parameters with zero address as nominee
+      const zeroAddress = ethers.constants.AddressZero;
+      const remark = ethers.utils.toUtf8Bytes("Beneficiary transfer remark");
+      const nonce = ethers.BigNumber.from(0);
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, zeroAddress, ethers.constants.AddressZero, nonce, 1]
+      );
+  
+      // Generate signature
+      const messageHash = ethers.utils.keccak256(actionData);
+      const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
+  
+      // Attempt transfer with zero address nominee
+      await expect(
+        titleFlow
+          .connect(deployer)
+          .transferBeneficiary(zeroAddress, remark, titleEscrowMock.address, actionData, signature, nonce)
+      ).to.be.revertedWith("InvalidOperationToZeroAddress");
+  
+      // Verify state unchanged
+      expect(await titleEscrowMock.beneficiary(), "Beneficiary incorrectly changed").to.equal(owner.address);
+      expect(
+        await titleFlow.nonce(titleEscrowMock.address, owner.address),
+        "Nonce incorrectly incremented"
+      ).to.equal(0);
+    });
+
+    it("should revert when title escrow is a non-escrow address", async () => {
+      // Validate initial state
+      const ATTORNEY_ADMIN_ROLE = await titleFlow.ATTORNEY_ADMIN_ROLE();
+      expect(
+        await titleFlow.hasRole(ATTORNEY_ADMIN_ROLE, deployer.address),
+        "Deployer does not have ATTORNEY_ADMIN_ROLE"
+      ).to.be.true;
+      expect(await titleEscrowMock.beneficiary(), "Initial beneficiary incorrect").to.equal(owner.address);
+    
+      // Prepare transfer parameters with non-escrow address
+      const invalidEscrow = nominee.address; // Random non-escrow address
+      const remark = ethers.utils.toUtf8Bytes("Beneficiary transfer remark");
+      const nonce = ethers.BigNumber.from(0);
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, invalidEscrow, nominee.address, ethers.constants.AddressZero, nonce, 1]
+      );
+    
+      // Generate signature
+      const messageHash = ethers.utils.keccak256(actionData);
+      const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
+          
+      // Attempt transfer with invalid escrow address
+      await expect(
+        titleFlow
+          .connect(deployer)
+          .transferBeneficiary(nominee.address, remark, invalidEscrow, actionData, signature, nonce)
+      ).to.be.revertedWith("InvalidOperationToZeroAddress");
+    
+      // Verify state unchanged
+      expect(await titleEscrowMock.beneficiary(), "Beneficiary incorrectly changed").to.equal(owner.address);
+      expect(
+        await titleFlow.nonce(invalidEscrow, owner.address),
+        "Nonce incorrectly incremented"
+      ).to.equal(0);
+    });
+
+    it("should revert when signature is invalid", async () => {
+      // Validate initial state
+      const ATTORNEY_ADMIN_ROLE = await titleFlow.ATTORNEY_ADMIN_ROLE();
+      expect(
+        await titleFlow.hasRole(ATTORNEY_ADMIN_ROLE, deployer.address),
+        "Deployer does not have ATTORNEY_ADMIN_ROLE"
+      ).to.be.true;
+      expect(await titleEscrowMock.beneficiary(), "Initial beneficiary incorrect").to.equal(owner.address);
+    
+      // Prepare transfer parameters
+      const remark = ethers.utils.toUtf8Bytes("Beneficiary transfer remark");
+      const nonce = ethers.BigNumber.from(0);
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, nominee.address, ethers.constants.AddressZero, nonce, 1]
+      );
+    
+      // Generate invalid signature (signed by nominee instead of owner)
+      const messageHash = ethers.utils.keccak256(actionData);
+      const invalidSignature = await nominee.signMessage(ethers.utils.arrayify(messageHash));
+    
+      // Attempt transfer with invalid signature
+      await expect(
+        titleFlow
+          .connect(deployer)
+          .transferBeneficiary(nominee.address, remark, titleEscrowMock.address, actionData, invalidSignature, nonce)
+      ).to.be.revertedWith("InvalidSigner"); // Adjust to specific error if different
+    
+      // Verify state unchanged
+      expect(await titleEscrowMock.beneficiary(), "Beneficiary incorrectly changed").to.equal(owner.address);
+      expect(
+        await titleFlow.nonce(titleEscrowMock.address, owner.address),
+        "Nonce incorrectly incremented"
+      ).to.equal(0);
+    });
+
+    it("should revert when reusing a nonce after a successful transfer", async () => {
+      // Validate initial state
+      const ATTORNEY_ADMIN_ROLE = await titleFlow.ATTORNEY_ADMIN_ROLE();
+      expect(
+        await titleFlow.hasRole(ATTORNEY_ADMIN_ROLE, deployer.address),
+        "Deployer does not have ATTORNEY_ADMIN_ROLE"
+      ).to.be.true;
+      expect(await titleEscrowMock.beneficiary(), "Initial beneficiary incorrect").to.equal(owner.address);
+      expect(
+        await titleFlow.nonce(titleEscrowMock.address, owner.address),
+        "Initial nonce incorrect"
+      ).to.equal(0);
+    
+      // Prepare first transfer parameters
+      const remark = ethers.utils.toUtf8Bytes("First beneficiary transfer");
+      const nonce = ethers.BigNumber.from(0);
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, nominee.address, ethers.constants.AddressZero, nonce, 1]
+      );
+    
+      // Generate signature for first transfer
+      const messageHash = ethers.utils.keccak256(actionData);
+      const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
+    
+      // Perform first transfer
+      const tx = await titleFlow
+        .connect(deployer)
+        .transferBeneficiary(nominee.address, remark, titleEscrowMock.address, actionData, signature, nonce);
+      await tx.wait();
+    
+      // Verify first transfer success
+      expect(await titleEscrowMock.beneficiary(), "Beneficiary not updated").to.equal(nominee.address);
+      expect(
+        await titleFlow.nonce(titleEscrowMock.address, owner.address),
+        "Nonce not incremented"
+      ).to.equal(1);
+    
+      // Prepare second transfer with reused nonce
+      const secondRemark = ethers.utils.toUtf8Bytes("Second beneficiary transfer remark"); // Fixed: toUtf8 -> toUtf8Bytes
+      const secondActionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, deployer.address, ethers.constants.AddressZero, nonce, 1]
+      );
+    
+      // Generate signature with reused nonce
+      const secondMessageHash = ethers.utils.keccak256(secondActionData);
+      const secondSignature = await owner.signMessage(ethers.utils.arrayify(secondMessageHash));
+    
+      // Attempt second transfer with reused nonce
+      await expect(
+        titleFlow
+          .connect(deployer)
+          .transferBeneficiary(deployer.address, secondRemark, titleEscrowMock.address, secondActionData, secondSignature, nonce)
+      ).to.be.revertedWith("InvalidNonce"); // Adjust to specific error if needed
+    
+      // Verify state unchanged after failed attempt
+      expect(await titleEscrowMock.beneficiary(), "Beneficiary incorrectly changed").to.equal(nominee.address);
+      expect(
+        await titleFlow.nonce(titleEscrowMock.address, owner.address),
+        "Nonce incorrectly incremented again"
+      ).to.equal(1);
+    });
+
+    it("should succeed with empty remark and emit BeneficiaryTransfer event", async () => {
+      // Validate initial state
+      const ATTORNEY_ADMIN_ROLE = await titleFlow.ATTORNEY_ADMIN_ROLE();
+      expect(
+        await titleFlow.hasRole(ATTORNEY_ADMIN_ROLE, deployer.address),
+        "Deployer does not have ATTORNEY_ADMIN_ROLE"
+      ).to.be.true;
+      expect(await titleEscrowMock.beneficiary(), "Initial beneficiary incorrect").to.equal(owner.address);
+      expect(
+        await titleFlow.nonce(titleEscrowMock.address, owner.address),
+        "Initial nonce incorrect"
+      ).to.equal(0);
+    
+      // Prepare transfer parameters with empty remark
+      const remark = ethers.utils.toUtf8Bytes(""); // Empty remark
+      const nonce = ethers.BigNumber.from(0);
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, nominee.address, ethers.constants.AddressZero, nonce, 1]
+      );
+    
+      // Generate signature
+      const messageHash = ethers.utils.keccak256(actionData);
+      const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
+    
+      // Perform transfer
+      const tx = await titleFlow
+        .connect(deployer)
+        .transferBeneficiary(nominee.address, remark, titleEscrowMock.address, actionData, signature, nonce);
+      const receipt = await tx.wait();
+    
+      // Verify BeneficiaryTransfer event
+      const event = receipt.events?.find((e) => e.event === "BeneficiaryTransfer");
+      expect(event, "BeneficiaryTransfer event not emitted").to.exist;
+      expect(event?.args?.fromBeneficiary, "Incorrect fromBeneficiary").to.equal(owner.address);
+      expect(event?.args?.toBeneficiary, "Incorrect toBeneficiary").to.equal(nominee.address);
+      expect(event?.args?.registry, "Incorrect registry").to.equal(titleEscrowMock.address);
+      expect(event?.args?.tokenId, "Incorrect tokenId").to.equal(42);
+      expect(event?.args?.remark, "Incorrect remark").to.equal(ethers.utils.hexlify(remark));
+    
+      // Verify state changes
+      expect(await titleEscrowMock.beneficiary(), "Beneficiary not updated").to.equal(nominee.address);
+      expect(
+        await titleFlow.nonce(titleEscrowMock.address, owner.address),
+        "Nonce not incremented"
+      ).to.equal(1);
+    });
+
+    it("should succeed with max-length remark and emit BeneficiaryTransfer event", async () => {
+      // Validate initial state
+      const ATTORNEY_ADMIN_ROLE = await titleFlow.ATTORNEY_ADMIN_ROLE();
+      expect(
+        await titleFlow.hasRole(ATTORNEY_ADMIN_ROLE, deployer.address),
+        "Deployer does not have ATTORNEY_ADMIN_ROLE"
+      ).to.be.true;
+      expect(await titleEscrowMock.beneficiary(), "Initial beneficiary incorrect").to.equal(owner.address);
+      expect(
+        await titleFlow.nonce(titleEscrowMock.address, owner.address),
+        "Initial nonce incorrect"
+      ).to.equal(0);
+    
+      // Prepare transfer parameters with max-length remark (256 bytes)
+      const longRemarkString = "a".repeat(256); // 256 ASCII chars = 256 bytes
+      const remark = ethers.utils.toUtf8Bytes(longRemarkString);
+      const nonce = ethers.BigNumber.from(0);
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, nominee.address, ethers.constants.AddressZero, nonce, 1]
+      );
+    
+      // Generate signature
+      const messageHash = ethers.utils.keccak256(actionData);
+      const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
+    
+      // Perform transfer
+      const tx = await titleFlow
+        .connect(deployer)
+        .transferBeneficiary(nominee.address, remark, titleEscrowMock.address, actionData, signature, nonce);
+      const receipt = await tx.wait();
+    
+      // Verify BeneficiaryTransfer event
+      const event = receipt.events?.find((e) => e.event === "BeneficiaryTransfer");
+      expect(event, "BeneficiaryTransfer event not emitted").to.exist;
+      expect(event?.args?.fromBeneficiary, "Incorrect fromBeneficiary").to.equal(owner.address);
+      expect(event?.args?.toBeneficiary, "Incorrect toBeneficiary").to.equal(nominee.address);
+      expect(event?.args?.registry, "Incorrect registry").to.equal(titleEscrowMock.address);
+      expect(event?.args?.tokenId, "Incorrect tokenId").to.equal(42);
+      expect(event?.args?.remark, "Incorrect remark").to.equal(ethers.utils.hexlify(remark));
+    
+      // Verify state changes
+      expect(await titleEscrowMock.beneficiary(), "Beneficiary not updated").to.equal(nominee.address);
+      expect(
+        await titleFlow.nonce(titleEscrowMock.address, owner.address),
+        "Nonce not incremented"
+      ).to.equal(1);
+    });
+
+    it("should prevent reentrancy attack via malicious title escrow (Test 10)", async () => {
+      // Deploy malicious TitleEscrow contract
+      const MaliciousTitleEscrow = await ethers.getContractFactory("MaliciousTitleEscrow");
+      const maliciousTitleEscrow = await MaliciousTitleEscrow.deploy(titleFlow.address);
+      await maliciousTitleEscrow.deployed();
+    
+      // Validate initial state
+      const ATTORNEY_ADMIN_ROLE = await titleFlow.ATTORNEY_ADMIN_ROLE();
+      expect(
+        await titleFlow.hasRole(ATTORNEY_ADMIN_ROLE, deployer.address),
+        "Deployer does not have ATTORNEY_ADMIN_ROLE"
+      ).to.be.true;
+      expect(await maliciousTitleEscrow.beneficiary(), "Initial beneficiary incorrect").to.equal(deployer.address);
+      const initialNonce = await titleFlow.nonce(maliciousTitleEscrow.address, owner.address);
+      expect(initialNonce, "Initial nonce incorrect").to.equal(0);
+    
+      // Prepare transfer parameters
+      const remark = ethers.utils.toUtf8Bytes("Reentrancy test");
+      const nonce = ethers.BigNumber.from(0);
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, maliciousTitleEscrow.address, nominee.address, ethers.constants.AddressZero, nonce, 1]
+      );
+    
+      // Generate signature
+      const messageHash = ethers.utils.keccak256(actionData);
+      const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
+    
+      // Attempt transfer with malicious title escrow
+      try {
+        const tx = await titleFlow
+          .connect(deployer)
+          .transferBeneficiary(nominee.address, remark, maliciousTitleEscrow.address, actionData, signature, nonce);
+        expect.fail("Expected transaction to revert with ReentrancyGuard: reentrant call");
+      } catch (error: unknown) {
+        if (error instanceof Error) {
+          expect(error.message).to.include("ReentrancyGuard: reentrant call");
+        } else {
+          expect.fail("Expected an Error object");
+        }
+      }
+    
+      // Verify state unchanged
+      expect(await maliciousTitleEscrow.beneficiary(), "Beneficiary incorrectly changed").to.equal(deployer.address);
+      expect(
+        await titleFlow.nonce(maliciousTitleEscrow.address, deployer.address),
+        "Nonce incorrectly incremented"
+      ).to.equal(0);
+    });
+
   });
 
   describe("transferOwners()", () => {
