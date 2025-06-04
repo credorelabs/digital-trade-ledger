@@ -1284,8 +1284,7 @@ describe("TitleFlow", () => {
       );
       const messageHash = ethers.utils.keccak256(actionData);
       const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
-  
-      console.log("Calling transferOwners with malicious escrow...");
+
       await expect(
         titleFlow.connect(deployer).transferOwners(
           nominee.address,
