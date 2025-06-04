@@ -14,6 +14,16 @@ interface INominateContract {
 }
 
 interface ITitleFlow {
+    function transferOwners(
+        address _nominee,
+        address _newHolder,
+        bytes calldata _remark,
+        address _titleEscrow,
+        bytes memory _data,
+        bytes calldata _signature,
+        uint256 _nonce
+    ) external;
+
     function transferBeneficiary(
         address _nominee,
         bytes calldata _remark,
@@ -172,5 +182,33 @@ contract MaliciousTitleEscrow is ITitleEscrowV2 {
 
         active = false;
         return true;
+    }
+
+    function transferOwners(address _nominee, address _newHolder, bytes calldata _remark) external returns (bool) {
+        // Attempt reentrancy
+        bytes memory reentrantData = abi.encode(
+            target,           // titleFlow.address
+            address(this),    // MaliciousTitleEscrow
+            _nominee,         // Same nominee
+            _newHolder,       // Same newHolder
+            0,                // nonce
+            9                 // ActionType.OwnersTransfer
+        );
+        bytes memory dummySignature = new bytes(65); // Invalid signature
+        ITitleFlow(target).transferOwners(_nominee, _newHolder, _remark, address(this), reentrantData, dummySignature, 0);
+
+        beneficiary = _nominee;
+        holder = _newHolder;
+        return true;
+    }
+
+    // IERC721Receiver implementation
+    function onERC721Received(
+        address,
+        address,
+        uint256,
+        bytes calldata
+    ) external pure returns (bytes4) {
+        return this.onERC721Received.selector;
     }
 }
