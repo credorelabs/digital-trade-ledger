@@ -52,6 +52,13 @@ describe("TitleFlow", () => {
   });
 
   describe("nominate()", () => {
+    it("should have correct initial state", async () => {
+      await titleEscrowMock.setState(owner.address, deployer.address, zeroAddress, zeroAddress, zeroAddress, true, titleEscrowMock.address, 42);
+      expect(await titleEscrowMock.active()).to.be.true;
+      expect(await titleEscrowMock.beneficiary()).to.equal(owner.address);
+      expect(await titleEscrowMock.holder()).to.equal(deployer.address);
+    });    
+
     it("should successfully nominate with valid signature and emit Nomination event", async () => {
       const nonce = 0;
       const remark = ethers.utils.toUtf8Bytes("Nomination remark");
@@ -1370,12 +1377,13 @@ describe("TitleFlow", () => {
     let titleEscrowMock: TitleEscrowMock;
     let deployer: SignerWithAddress; // Attorney (admin)
     let owner: SignerWithAddress;    // Owner who signs actions
+    let nonAdmin: SignerWithAddress; // Non-attorney user
 
     const ATTORNEY_ADMIN_ROLE = ethers.utils.keccak256(ethers.utils.toUtf8Bytes("ATTORNEY_ADMIN_ROLE"));
     const zeroAddress = ethers.constants.AddressZero;
 
     beforeEach(async () => {
-      [deployer, owner] = await ethers.getSigners();
+      [deployer, owner, nonAdmin] = await ethers.getSigners();
 
       const TitleEscrowMockFactory = await ethers.getContractFactory("TitleEscrowMock");
       titleEscrowMock = await TitleEscrowMockFactory.deploy();
@@ -1434,8 +1442,302 @@ describe("TitleFlow", () => {
       // Verify mock state (active set to false)
       expect(await titleEscrowMock.active()).to.be.false;
     });
-  });
 
+    it("should revert if signature is invalid", async () => {
+      const nonce = 0;
+      const remark = ethers.utils.toUtf8Bytes("Invalid signature shred");
+      // const actionData = ethers.utils.defaultAbiCoder.encode(
+      //   ["address", "address", "address", "address", "uint256", "uint8"],
+      //   [titleFlow.address, titleEscrowMock.address, zeroAddress, zeroAddress, nonce, 8]
+      // );
+      // const messageHash = ethers.utils.keccak256(actionData);
+      // const invalidSignature = await nonAdmin.signMessage(ethers.utils.arrayify(messageHash)); // Signed by non-owner
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, zeroAddress, zeroAddress, nonce, 8] // ActionType.Shred = 8
+      );
+      const messageHash = ethers.utils.keccak256(actionData);
+      const invalidSignature = await nonAdmin.signMessage(ethers.utils.arrayify(messageHash)); // Signed by non-owner
+  
+      await expect(
+        titleFlow.connect(deployer).shred(
+          remark,
+          titleEscrowMock.address,
+          actionData,
+          invalidSignature,
+          nonce
+        )
+      ).to.be.revertedWith("InvalidSigner");
+  
+      expect(await titleFlow.nonce(titleEscrowMock.address, owner.address)).to.equal(0);
+      expect(await titleEscrowMock.active()).to.be.true;
+    });
+
+    it("should revert if nonce is invalid", async () => {
+      const nonce = 1; // Expected nonce is 0
+      const remark = ethers.utils.toUtf8Bytes("Invalid nonce shred");
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, zeroAddress, zeroAddress, nonce, 8]
+      );
+      const messageHash = ethers.utils.keccak256(actionData);
+      const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
+  
+      await expect(
+        titleFlow.connect(deployer).shred(
+          remark,
+          titleEscrowMock.address,
+          actionData,
+          signature,
+          nonce
+        )
+      ).to.be.revertedWith("InvalidNonce");
+  
+      expect(await titleFlow.nonce(titleEscrowMock.address, owner.address)).to.equal(0);
+      expect(await titleEscrowMock.active()).to.be.true;
+    });
+
+    it("should revert if _titleEscrow is zero address", async () => {
+      // Ensure mock is in a known state
+      await titleEscrowMock.setState(
+        owner.address,        // Beneficiary
+        deployer.address,     // Holder
+        zeroAddress,          // PrevBeneficiary
+        zeroAddress,          // PrevHolder
+        zeroAddress,          // Nominee
+        true,                 // Active
+        titleEscrowMock.address, // Registry
+        42                    // TokenId
+      );
+      await titleEscrowMock.setShouldFail(false); // Ensure shred does not fail internally
+
+      const nonce = 0;
+      const remark = ethers.utils.toUtf8Bytes("Zero address shred");
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, zeroAddress, zeroAddress, zeroAddress, nonce, 8] // ActionType.Shred = 8
+      );
+      const messageHash = ethers.utils.keccak256(actionData);
+      const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
+
+      await expect(
+        titleFlow.connect(deployer).shred(
+          remark,
+          zeroAddress,
+          actionData,
+          signature,
+          nonce
+        )
+      ).to.be.revertedWith("InvalidOperationToZeroAddress");
+
+      // Verify mock escrow state unchanged
+      expect(await titleEscrowMock.active()).to.be.true;
+      // Verify nonce for valid escrow remains unchanged
+      expect(await titleFlow.nonce(titleEscrowMock.address, owner.address)).to.equal(0);
+    });
+    
+    it("should revert if TitleEscrow shred call fails", async () => {
+      // Ensure mock is in a known state
+      await titleEscrowMock.setState(
+        owner.address,        // Beneficiary
+        deployer.address,     // Holder
+        zeroAddress,          // PrevBeneficiary
+        zeroAddress,          // PrevHolder
+        zeroAddress,          // Nominee
+        true,                 // Active
+        titleEscrowMock.address, // Registry
+        42                    // TokenId
+      );
+      
+      // Configure mock to fail shred
+      await titleEscrowMock.setShouldFail(true);
+    
+      const nonce = 0;
+      const remark = ethers.utils.toUtf8Bytes("Shred call fails");
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, zeroAddress, zeroAddress, nonce, 8] // ActionType.Shred = 8
+      );
+      const messageHash = ethers.utils.keccak256(actionData);
+      const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
+          
+      await expect(
+        titleFlow.connect(deployer).shred(
+          remark,
+          titleEscrowMock.address,
+          actionData,
+          signature,
+          nonce
+        )
+      ).to.be.revertedWith("ActionFailed(\"Shred failed\")");
+    
+      // Verify state unchanged
+      expect(await titleFlow.nonce(titleEscrowMock.address, owner.address)).to.equal(0);
+      expect(await titleEscrowMock.active()).to.be.true;
+    });
+
+    it("should prevent reentrancy attack via malicious title escrow", async () => {
+      // Deploy malicious TitleEscrow
+      const MaliciousTitleEscrowFactory = await ethers.getContractFactory("MaliciousTitleEscrow");
+      const maliciousTitleEscrow = await MaliciousTitleEscrowFactory.deploy(titleFlow.address);
+      await maliciousTitleEscrow.deployed();
+    
+      // Set initial state for malicious escrow
+      await maliciousTitleEscrow.setState(
+        owner.address,        // Beneficiary
+        deployer.address,     // Holder
+        zeroAddress,          // Nominee
+        zeroAddress,          // PendingBeneficiary
+        zeroAddress,          // PendingHolder
+        true,                 // Active
+        maliciousTitleEscrow.address, // Registry
+        42                    // TokenId
+      );
+    
+      const nonce = 0;
+      const remark = ethers.utils.toUtf8Bytes("Reentrancy shred");
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, maliciousTitleEscrow.address, zeroAddress, zeroAddress, nonce, 8] // ActionType.Shred = 8
+      );
+      const messageHash = ethers.utils.keccak256(actionData);
+      const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
+    
+      await expect(
+        titleFlow.connect(deployer).shred(
+          remark,
+          maliciousTitleEscrow.address,
+          actionData,
+          signature,
+          nonce
+        )
+      ).to.be.revertedWith("ActionFailed(\"Shred failed\")");
+    
+      // Verify state unchanged
+      expect(await titleFlow.nonce(maliciousTitleEscrow.address, owner.address)).to.equal(0);
+      expect(await maliciousTitleEscrow.active()).to.be.true;
+    });
+
+    it("should succeed with empty remark", async () => {
+      const nonce = 0;
+      const remark = ethers.utils.toUtf8Bytes(""); // Empty remark
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, zeroAddress, zeroAddress, nonce, 8]
+      );
+      const messageHash = ethers.utils.keccak256(actionData);
+      const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
+  
+      const tx = await titleFlow.connect(deployer).shred(
+        remark,
+        titleEscrowMock.address,
+        actionData,
+        signature,
+        nonce
+      );
+      const receipt = await tx.wait();
+  
+      const event = receipt.events?.find((e) => e.event === "Shred");
+      expect(event).to.exist;
+      expect(event?.args?.registry).to.equal(titleEscrowMock.address);
+      expect(event?.args?.tokenId).to.equal(42);
+      expect(event?.args?.remark).to.equal(ethers.utils.hexlify(remark));
+  
+      expect(await titleFlow.nonce(titleEscrowMock.address, owner.address)).to.equal(1);
+      expect(await titleEscrowMock.active()).to.be.false;
+    });
+
+    it("should revert on second shred with same nonce", async () => {
+      const nonce = 0;
+      const remark = ethers.utils.toUtf8Bytes("First shred");
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, zeroAddress, zeroAddress, nonce, 8]
+      );
+      const messageHash = ethers.utils.keccak256(actionData);
+      const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
+  
+      // First shred
+      await titleFlow.connect(deployer).shred(
+        remark,
+        titleEscrowMock.address,
+        actionData,
+        signature,
+        nonce
+      );
+  
+      expect(await titleFlow.nonce(titleEscrowMock.address, owner.address)).to.equal(1);
+      expect(await titleEscrowMock.active()).to.be.false;
+  
+      // Second shred with same nonce
+      const remark2 = ethers.utils.toUtf8Bytes("Second shred");
+      await expect(
+        titleFlow.connect(deployer).shred(
+          remark2,
+          titleEscrowMock.address,
+          actionData,
+          signature,
+          nonce
+        )
+      ).to.be.revertedWith("InvalidNonce");
+  
+      expect(await titleFlow.nonce(titleEscrowMock.address, owner.address)).to.equal(1);
+    });
+
+    it("should revert if action data is incorrectly encoded", async () => {
+      const nonce = 0;
+      const remark = ethers.utils.toUtf8Bytes("Invalid data shred");
+      // Incorrectly encoded actionData (wrong types or structure)
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "uint256"], // Wrong structure
+        [titleEscrowMock.address, nonce]
+      );
+      const messageHash = ethers.utils.keccak256(actionData);
+      const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
+  
+      await expect(
+        titleFlow.connect(deployer).shred(
+          remark,
+          titleEscrowMock.address,
+          actionData,
+          signature,
+          nonce
+        )
+      ).to.be.reverted; // Exact revert reason depends on _verifyAction
+  
+      expect(await titleFlow.nonce(titleEscrowMock.address, owner.address)).to.equal(0);
+      expect(await titleEscrowMock.active()).to.be.true;
+    });
+
+    it("should succeed with large remark", async () => {
+      const nonce = 0;
+      const largeRemark = ethers.utils.toUtf8Bytes("a".repeat(1000)); // 1 KB remark
+      const actionData = ethers.utils.defaultAbiCoder.encode(
+        ["address", "address", "address", "address", "uint256", "uint8"],
+        [titleFlow.address, titleEscrowMock.address, zeroAddress, zeroAddress, nonce, 8]
+      );
+      const messageHash = ethers.utils.keccak256(actionData);
+      const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
+  
+      const tx = await titleFlow.connect(deployer).shred(
+        largeRemark,
+        titleEscrowMock.address,
+        actionData,
+        signature,
+        nonce
+      );
+      const receipt = await tx.wait();
+  
+      const event = receipt.events?.find((e) => e.event === "Shred");
+      expect(event).to.exist;
+      expect(event?.args?.registry).to.equal(titleEscrowMock.address);
+      expect(event?.args?.tokenId).to.equal(42);
+      expect(event?.args?.remark).to.equal(ethers.utils.hexlify(largeRemark));
+  
+      expect(await titleFlow.nonce(titleEscrowMock.address, owner.address)).to.equal(1);
+      expect(await titleEscrowMock.active()).to.be.false;
+    });
+  });
 });
 
 
