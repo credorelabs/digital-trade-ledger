@@ -13,6 +13,7 @@ contract TitleEscrowMock is ITitleEscrowV2 {
     uint256 public override tokenId;
 
     bool public shouldFail; // Toggle to simulate failures
+    bool public shredSuccess = true;
 
     constructor() {
         beneficiary = address(0x1234); // Dummy initial values
@@ -80,6 +81,10 @@ contract TitleEscrowMock is ITitleEscrowV2 {
     function shred(bytes calldata _remark) external override {
         if (shouldFail) revert("Mock failure");
         active = false;
+    }
+
+    function setShredSuccess(bool _success) external {
+        shredSuccess = _success;
     }
 
     function isHoldingToken() external override returns (bool) {
