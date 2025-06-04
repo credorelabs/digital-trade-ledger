@@ -822,9 +822,6 @@ describe("TitleFlow", () => {
       const secondMessageHash = ethers.utils.keccak256(secondActionData);
       const secondSignature = await owner.signMessage(ethers.utils.arrayify(secondMessageHash));
     
-      // Log state before second attempt
-      console.log(`Nonce before retry: ${(await titleFlow.nonce(titleEscrowMock.address, owner.address)).toString()}`);
-    
       // Attempt second transfer with reused nonce
       await expect(
         titleFlow
@@ -965,30 +962,16 @@ describe("TitleFlow", () => {
       const messageHash = ethers.utils.keccak256(actionData);
       const signature = await owner.signMessage(ethers.utils.arrayify(messageHash));
     
-      // Log initial state
-      console.log(`Deployer address: ${deployer.address}`);
-      console.log(`Malicious title escrow address: ${maliciousTitleEscrow.address}`);
-      console.log(`Initial nonce: ${initialNonce.toString()}`);
-      console.log(`Remark: ${ethers.utils.hexlify(remark)}`);
-      console.log(`Signature: ${signature}`);
-      console.log(`Action data: ${ethers.utils.hexlify(actionData)}`);
-    
       // Attempt transfer with malicious title escrow
       try {
         const tx = await titleFlow
           .connect(deployer)
           .transferBeneficiary(nominee.address, remark, maliciousTitleEscrow.address, actionData, signature, nonce);
-        const receipt = await tx.wait();
-        console.log("Transaction succeeded unexpectedly. Receipt:", receipt);
-        const finalNonce = await titleFlow.nonce(maliciousTitleEscrow.address, owner.address);
-        console.log(`Final nonce: ${finalNonce.toString()}`);
         expect.fail("Expected transaction to revert with ReentrancyGuard: reentrant call");
       } catch (error: unknown) {
         if (error instanceof Error) {
-          console.log("Revert reason:", error.message);
           expect(error.message).to.include("ReentrancyGuard: reentrant call");
         } else {
-          console.log("Caught non-Error object:", error);
           expect.fail("Expected an Error object");
         }
       }
