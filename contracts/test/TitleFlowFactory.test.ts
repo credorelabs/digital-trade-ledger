@@ -9,6 +9,7 @@ describe("TitleFlowFactory", () => {
   let deployer: SignerWithAddress;
   let attorney: SignerWithAddress;
   let user: SignerWithAddress;
+  let user2: SignerWithAddress;
   let nonAdmin: SignerWithAddress;
   const zeroAddress = ethers.constants.AddressZero;
 
@@ -18,7 +19,7 @@ describe("TitleFlowFactory", () => {
   );
 
   beforeEach(async () => {
-    [deployer, attorney, user, nonAdmin] = await ethers.getSigners();
+    [deployer, attorney, user, nonAdmin, user2] = await ethers.getSigners();
 
     // Deploy TitleFlow implementation
     const TitleFlowFactory = await ethers.getContractFactory("TitleFlow");
@@ -65,6 +66,63 @@ describe("TitleFlowFactory", () => {
       ).to.be.revertedWith(
         `AccessControl: account ${nonAdmin.address.toLowerCase()} is missing role ${ATTORNEY_ADMIN_ROLE}`
       );
+    });
+
+    it("should revert if owner is zero address", async () => {
+      await expect(
+        factory.connect(deployer).create(zeroAddress)
+      ).to.be.revertedWith("InvalidAddress");
+
+      // Verify no TitleFlow instance was created (no event)
+      const filter = factory.filters.TitleFlowCreated();
+      const events = await factory.queryFilter(filter);
+      expect(events).to.have.lengthOf(0);
+    });
+
+    it("should revert if creating with same admin and owner", async () => {
+      // First creation
+      await factory.connect(deployer).create(user.address);
+
+      // Second creation with same parameters
+      await expect(
+        factory.connect(deployer).create(user.address)
+      ).to.be.revertedWith("ERC1167: create2 failed"); // Clone already exists at deterministic address
+
+      // Verify only one event was emitted
+      const filter = factory.filters.TitleFlowCreated(deployer.address, user.address);
+      const events = await factory.queryFilter(filter);
+      expect(events).to.have.lengthOf(1);
+    });
+
+    it("should create unique TitleFlow instances for different owners", async () => {
+      const predictedAddress1 = await factory.connect(deployer).getAddress(user.address);
+      const predictedAddress2 = await factory.connect(deployer).getAddress(user2.address);
+
+      expect(predictedAddress1).to.not.equal(predictedAddress2);
+
+      // Create first instance
+      await factory.connect(deployer).create(user.address);
+      const titleFlow1 = await ethers.getContractAt("TitleFlow", predictedAddress1);
+      expect(await titleFlow1.owner()).to.equal(user.address);
+
+      // Create second instance
+      await factory.connect(deployer).create(user2.address);
+      const titleFlow2 = await ethers.getContractAt("TitleFlow", predictedAddress2);
+      expect(await titleFlow2.owner()).to.equal(user2.address);
+
+      // Verify two events
+      const filter = factory.filters.TitleFlowCreated();
+      const events = await factory.queryFilter(filter);
+      expect(events).to.have.lengthOf(2);
+    });
+
+    it("should grant ATTORNEY_ADMIN_ROLE to caller in new TitleFlow", async () => {
+      const predictedAddress = await factory.connect(deployer).getAddress(user.address);
+      await factory.connect(deployer).create(user.address);
+
+      const titleFlow = await ethers.getContractAt("TitleFlow", predictedAddress);
+      const hasRole = await titleFlow.hasRole(ATTORNEY_ADMIN_ROLE, deployer.address);
+      expect(hasRole).to.be.true;
     });
   });
 
